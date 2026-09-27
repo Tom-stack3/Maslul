@@ -34,13 +34,15 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.SwapCalls
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -90,7 +92,9 @@ import com.maslul.app.data.Ranking
 import com.maslul.app.data.SavedTrip
 import com.maslul.app.data.TransitMode
 import com.maslul.app.data.TransitousApi
+import com.maslul.app.data.UserData
 import com.maslul.app.data.WalkSpeed
+import com.maslul.app.data.favoriteFor
 import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
 import com.maslul.app.ui.components.Fmt
@@ -295,46 +299,39 @@ fun RoutesScreen(model: RoutesModel) {
                     }
                     Column {
                         IconButton(onClick = model::swap) { Icon(Icons.Rounded.SwapVert, "Swap") }
-                        val saved = data.savedTrips.any { it.from.key == model.from.key && it.to.key == model.to.key }
-                        IconButton(onClick = model::toggleSaved) {
-                            Icon(
-                                if (saved) Icons.Rounded.Star else Icons.Rounded.StarBorder,
-                                "Save trip",
-                                tint = if (saved) Color(0xFFF5A524) else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        SaveMenu(model, data)
                     }
                 }
-                Row(
-                    Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp).horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    FilterChip(
-                        selected = model.timeMode != TimeMode.NOW,
-                        onClick = { showTime = true },
-                        label = { Text(timeLabel(model.timeMode, model.time)) },
-                        leadingIcon = { Icon(Icons.Rounded.Schedule, null, Modifier.size(18.dp)) },
-                        modifier = Modifier.testTag("time_chip"),
-                    )
-                    val s = data.settings
-                    val custom = s.modes.size < 6 || s.maxWalkMinutes != 15 || s.wheelchair || s.walkSpeed != WalkSpeed.NORMAL
-                    FilterChip(
-                        selected = custom,
-                        onClick = { showOptions = true },
-                        label = { Text("Options") },
-                        leadingIcon = { Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp)) },
-                    )
-                    if (s.wheelchair) {
-                        FilterChip(selected = true, onClick = { showOptions = true }, label = { Text("Accessible") },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Rounded.Accessible, null, Modifier.size(18.dp)) })
+                // Chips scroll (with end padding inside the scroll so the last one is never clipped);
+                // Refresh is a fixed icon button so it always stays reachable.
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        Modifier.weight(1f).horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilterChip(
+                            selected = model.timeMode != TimeMode.NOW,
+                            onClick = { showTime = true },
+                            label = { Text(timeLabel(model.timeMode, model.time)) },
+                            leadingIcon = { Icon(Icons.Rounded.Schedule, null, Modifier.size(18.dp)) },
+                            modifier = Modifier.testTag("time_chip"),
+                        )
+                        val s = data.settings
+                        val custom = s.modes.size < 6 || s.maxWalkMinutes != 15 || s.wheelchair || s.walkSpeed != WalkSpeed.NORMAL
+                        FilterChip(
+                            selected = custom,
+                            onClick = { showOptions = true },
+                            label = { Text("Options") },
+                            leadingIcon = { Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp)) },
+                        )
+                        if (s.wheelchair) {
+                            FilterChip(selected = true, onClick = { showOptions = true }, label = { Text("Accessible") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Rounded.Accessible, null, Modifier.size(18.dp)) })
+                        }
                     }
-                    AssistChip(
-                        onClick = model::refreshNow,
-                        enabled = !model.loading,
-                        label = { Text("Refresh") },
-                        leadingIcon = { Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp)) },
-                        modifier = Modifier.testTag("refresh_chip"),
-                    )
+                    IconButton(onClick = model::refreshNow, enabled = !model.loading, modifier = Modifier.testTag("refresh_chip")) {
+                        Icon(Icons.Rounded.Refresh, "Refresh")
+                    }
                 }
             }
         }
@@ -393,6 +390,45 @@ fun RoutesScreen(model: RoutesModel) {
             model.search()
         })
     }
+}
+
+/** Star menu: save the whole trip, and/or save the destination as a labelled favourite place. */
+@Composable
+private fun SaveMenu(model: RoutesModel, data: UserData) {
+    var open by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf<FavoriteDraft?>(null) }
+    val tripSaved = data.savedTrips.any { it.from.key == model.from.key && it.to.key == model.to.key }
+    val canFavorite = model.to.kind != PlaceKind.CURRENT_LOCATION
+    val favorite = data.favoriteFor(model.to)
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.testTag("save_menu")) {
+            Icon(
+                if (tripSaved || favorite != null) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                "Save",
+                tint = if (tripSaved || favorite != null) FavoriteGold else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(if (tripSaved) "Remove saved trip" else "Save this trip") },
+                leadingIcon = { Icon(Icons.Rounded.SwapCalls, null) },
+                onClick = { open = false; model.toggleSaved() },
+            )
+            if (canFavorite) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            if (favorite != null) "Edit favorite “${favorite.label}”" else "Save destination as favorite",
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    leadingIcon = { Icon(favorite?.icon?.vector() ?: Icons.Rounded.StarBorder, null) },
+                    onClick = { open = false; draft = FavoriteDraft.of(model.store, model.to) },
+                )
+            }
+        }
+    }
+    FavoriteDialogHost(model.store, draft) { draft = null }
 }
 
 @Composable

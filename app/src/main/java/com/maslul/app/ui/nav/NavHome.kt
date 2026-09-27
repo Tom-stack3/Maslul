@@ -3,7 +3,10 @@ package com.maslul.app.ui.nav
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -20,11 +23,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
@@ -32,7 +37,6 @@ import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Work
 import androidx.compose.material.icons.rounded.SwapCalls
 import androidx.compose.material3.Icon
@@ -54,6 +58,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.maslul.app.data.GeoPoint
@@ -119,6 +124,20 @@ class NavHomeModel(nav: AppNav) : ScreenModel(nav) {
     }
 
     fun openStop(p: Place) = nav.push(StopModel(nav, p))
+
+    /** Place whose favourite label is being edited. */
+    var favoriteDraft by mutableStateOf<FavoriteDraft?>(null)
+
+    fun editFavorite(p: Place) { favoriteDraft = FavoriteDraft.of(store, p) }
+
+    fun addFavorite() {
+        nav.push(
+            SearchModel(nav, from = null, to = null, editing = SearchField.TO, single = true, title = "Add favorite") { p, _ ->
+                nav.pop()
+                editFavorite(p)
+            },
+        )
+    }
 }
 
 @Composable
@@ -203,19 +222,31 @@ fun NavHomeScreen(model: NavHomeModel) {
                         Modifier.padding(top = 8.dp).align(Alignment.CenterHorizontally).size(36.dp, 4.dp)
                             .clip(CircleShape).background(MaterialTheme.colorScheme.outlineVariant),
                     )
+                    // Home and Work share the width; labelled favourites scroll beneath them.
                     Row(
-                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 14.dp),
+                        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         QuickPlace("Home", data.home?.name ?: "Set location", Icons.Rounded.Home,
+                            modifier = Modifier.weight(1f),
                             onClick = { data.home?.let(model::planTo) ?: model.pickHomeOrWork(true) },
                             onEdit = { model.pickHomeOrWork(true) })
                         QuickPlace("Work", data.work?.name ?: "Set location", Icons.Rounded.Work,
+                            modifier = Modifier.weight(1f),
                             onClick = { data.work?.let(model::planTo) ?: model.pickHomeOrWork(false) },
                             onEdit = { model.pickHomeOrWork(false) })
-                        data.favorites.forEach { f ->
-                            QuickPlace(f.name, f.subtitle ?: "", Icons.Rounded.Star, onClick = { model.planTo(f) })
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                            .padding(start = 16.dp, end = 16.dp, top = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        data.favoritePlaces.forEach { f ->
+                            FavoriteChip(f.label, f.icon.vector(),
+                                onClick = { model.planTo(f.place) },
+                                onLongClick = { model.editFavorite(f.place) })
                         }
+                        AddFavoriteChip(if (data.favoritePlaces.isEmpty()) "Add favorite place" else "Add", model::addFavorite)
                     }
                     if (data.savedTrips.isNotEmpty()) {
                         SectionHeader("Saved trips")
@@ -240,6 +271,7 @@ fun NavHomeScreen(model: NavHomeModel) {
                                     Icon(Icons.Rounded.Close, "Remove", tint = LocalExtra.current.subtle, modifier = Modifier.size(18.dp))
                                 }
                             },
+                            onLongClick = { model.editFavorite(p) },
                             onClick = { model.planTo(p) },
                         )
                     }
@@ -248,34 +280,71 @@ fun NavHomeScreen(model: NavHomeModel) {
             }
         }
     }
+    FavoriteDialogHost(model.store, model.favoriteDraft) { model.favoriteDraft = null }
 }
 
 @Composable
-private fun QuickPlace(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit, onEdit: (() -> Unit)? = null) {
+private fun QuickPlace(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    onEdit: (() -> Unit)? = null,
+) {
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = modifier,
     ) {
-        Row(Modifier.padding(start = 12.dp, end = if (onEdit != null) 2.dp else 14.dp, top = 10.dp, bottom = 10.dp),
+        Row(Modifier.padding(start = 12.dp, end = if (onEdit != null) 2.dp else 12.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            Column(Modifier.width(IntrinsicWidth)) {
+            Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = LocalExtra.current.subtle, maxLines = 1,
                     overflow = TextOverflow.Ellipsis)
             }
             if (onEdit != null) {
                 IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Rounded.Edit, "Edit", tint = LocalExtra.current.subtle, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Rounded.Edit, "Edit $title", tint = LocalExtra.current.subtle, modifier = Modifier.size(16.dp))
                 }
             }
         }
     }
 }
 
-private val IntrinsicWidth = 108.dp
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun FavoriteChip(label: String, icon: ImageVector, onClick: () -> Unit, onLongClick: () -> Unit) {
+    Row(
+        Modifier.height(40.dp).widthIn(max = 180.dp).clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .combinedClickable(onLongClick = onLongClick, onLongClickLabel = "Edit favorite", onClick = onClick)
+            .padding(start = 12.dp, end = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun AddFavoriteChip(text: String, onClick: () -> Unit) {
+    Row(
+        Modifier.height(40.dp).clip(RoundedCornerShape(20.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick).padding(start = 10.dp, end = 14.dp).testTag("add_favorite"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+    }
+}
 
 @Composable
 private fun SavedTripRow(t: SavedTrip, onClick: () -> Unit) {

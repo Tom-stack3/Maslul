@@ -7,6 +7,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -249,10 +250,12 @@ fun PlaceRow(
     iconTint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     modifier: Modifier = Modifier,
     trailing: @Composable (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     Row(
-        modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 11.dp),
+        modifier.fillMaxWidth().combinedClickable(onLongClick = onLongClick, onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(

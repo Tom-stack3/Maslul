@@ -32,17 +32,67 @@ data class Settings(
 @Serializable
 data class SavedTrip(val from: Place, val to: Place, val label: String? = null)
 
+/** Icon a user can pick for a favourite place. */
+@Serializable
+enum class FavoriteIcon { STAR, HEART, HOME, SCHOOL, GYM, SHOPPING, RESTAURANT, CAFE, HEALTH, PARK }
+
+/** A saved place with a user-chosen label, e.g. "Gym" or "Mom". */
+@Serializable
+data class FavoritePlace(
+    val place: Place,
+    val label: String,
+    val icon: FavoriteIcon = FavoriteIcon.STAR,
+) {
+    val key get() = place.key
+}
+
 @Serializable
 data class UserData(
     val home: Place? = null,
     val work: Place? = null,
+    /** Legacy unlabeled favourites (before labels existed); migrated into [favoritePlaces] on load. */
     val favorites: List<Place> = emptyList(),
+    val favoritePlaces: List<FavoritePlace> = emptyList(),
     val recents: List<Place> = emptyList(),
     val favoriteLines: List<LineRoute> = emptyList(),
     val savedTrips: List<SavedTrip> = emptyList(),
     val favoriteStops: List<Place> = emptyList(),
     val settings: Settings = Settings(),
 )
+
+/** Moves legacy unlabeled favourites into [UserData.favoritePlaces], labelled with the place name. */
+fun UserData.migrated(): UserData {
+    if (favorites.isEmpty()) return this
+    val known = favoritePlaces.map { it.key }.toSet()
+    val moved = favorites.filter { it.key !in known }.distinctBy { it.key }.map { FavoritePlace(it, it.name) }
+    return copy(favorites = emptyList(), favoritePlaces = favoritePlaces + moved)
+}
+
+fun UserData.favoriteFor(p: Place): FavoritePlace? = favoritePlaces.firstOrNull { it.key == p.key }
+
+/** Adds [p] as a favourite, or updates its label and icon if it is already one (keeping its position). */
+fun UserData.withFavorite(p: Place, label: String, icon: FavoriteIcon): UserData {
+    val clean = label.trim().ifEmpty { p.name }
+    val fav = FavoritePlace(p, clean, icon)
+    val i = favoritePlaces.indexOfFirst { it.key == p.key }
+    return copy(
+        favoritePlaces = if (i < 0) favoritePlaces + fav
+        else favoritePlaces.toMutableList().also { it[i] = fav.copy(place = favoritePlaces[i].place) },
+    )
+}
+
+fun UserData.withoutFavorite(key: String) = copy(favoritePlaces = favoritePlaces.filter { it.key != key })
+
+/** Moves the favourite with [key] by [delta] positions, clamped to the list bounds. */
+fun UserData.withFavoriteMoved(key: String, delta: Int): UserData {
+    val i = favoritePlaces.indexOfFirst { it.key == key }
+    if (i < 0) return this
+    val j = (i + delta).coerceIn(0, favoritePlaces.lastIndex)
+    if (i == j) return this
+    val list = favoritePlaces.toMutableList()
+    list.add(j, list.removeAt(i))
+    return copy(favoritePlaces = list)
+}
 
 /** Small persistent store for the user's places, favourites and settings. */
 class UserStore(context: Context) {
@@ -51,7 +101,7 @@ class UserStore(context: Context) {
     val data: StateFlow<UserData> = state.asStateFlow()
 
     private fun load(): UserData = prefs.getString(KEY, null)?.let {
-        runCatching { AppJson.decodeFromString<UserData>(it) }.getOrNull()
+        runCatching { AppJson.decodeFromString<UserData>(it).migrated() }.getOrNull()
     } ?: UserData()
 
     private fun edit(f: (UserData) -> UserData) {
@@ -69,10 +119,9 @@ class UserStore(context: Context) {
 
     fun removeRecent(p: Place) = edit { d -> d.copy(recents = d.recents.filter { it.key != p.key }) }
 
-    fun toggleFavorite(p: Place) = edit { d ->
-        val exists = d.favorites.any { it.key == p.key }
-        d.copy(favorites = if (exists) d.favorites.filter { it.key != p.key } else d.favorites + p)
-    }
+    fun saveFavorite(p: Place, label: String, icon: FavoriteIcon) = edit { it.withFavorite(p, label, icon) }
+    fun removeFavorite(key: String) = edit { it.withoutFavorite(key) }
+    fun moveFavorite(key: String, delta: Int) = edit { it.withFavoriteMoved(key, delta) }
 
     fun isFavoriteLine(r: LineRoute) = data.value.favoriteLines.any { it.operatorRef == r.operatorRef && it.mkt == r.mkt }
 

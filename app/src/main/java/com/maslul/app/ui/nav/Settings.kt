@@ -15,7 +15,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Work
 import androidx.compose.material3.FilterChip
@@ -29,6 +32,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -40,6 +45,17 @@ import com.maslul.app.ui.components.SectionHeader
 import com.maslul.app.ui.theme.LocalExtra
 
 class SettingsModel(nav: AppNav) : ScreenModel(nav) {
+    var favoriteDraft by mutableStateOf<FavoriteDraft?>(null)
+
+    fun addFavorite() {
+        nav.push(
+            SearchModel(nav, null, null, SearchField.TO, single = true, title = "Add favorite") { p, _ ->
+                nav.pop()
+                favoriteDraft = FavoriteDraft.of(store, p)
+            },
+        )
+    }
+
     fun pick(isHome: Boolean) {
         nav.push(
             SearchModel(nav, null, null, SearchField.TO, single = true, title = if (isHome) "Set home" else "Set work") { p, _ ->
@@ -67,6 +83,24 @@ fun SettingsScreen(model: SettingsModel) {
             PlaceRow("Work", data.work?.name ?: "Not set", icon = Icons.Rounded.Work,
                 trailing = { if (data.work != null) IconButton(onClick = { model.store.setWork(null) }) { Icon(Icons.Rounded.Close, "Clear") } },
                 onClick = { model.pick(false) })
+
+            SectionHeader("Favorite places")
+            data.favoritePlaces.forEachIndexed { i, f ->
+                PlaceRow(f.label, f.place.name, icon = f.icon.vector(), iconTint = MaterialTheme.colorScheme.primary,
+                    trailing = {
+                        Row {
+                            IconButton(onClick = { model.store.moveFavorite(f.key, -1) }, enabled = i > 0) {
+                                Icon(Icons.Rounded.KeyboardArrowUp, "Move up")
+                            }
+                            IconButton(onClick = { model.store.moveFavorite(f.key, 1) }, enabled = i < data.favoritePlaces.lastIndex) {
+                                Icon(Icons.Rounded.KeyboardArrowDown, "Move down")
+                            }
+                        }
+                    },
+                    onClick = { model.favoriteDraft = FavoriteDraft(f.place, f) })
+            }
+            PlaceRow("Add favorite place", "Tap a favorite above to edit or remove it",
+                icon = Icons.Rounded.Add, iconTint = MaterialTheme.colorScheme.primary, onClick = model::addFavorite)
 
             SectionHeader("Appearance")
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
@@ -106,4 +140,5 @@ fun SettingsScreen(model: SettingsModel) {
             Spacer(Modifier.height(24.dp))
         }
     }
+    FavoriteDialogHost(model.store, model.favoriteDraft) { model.favoriteDraft = null }
 }

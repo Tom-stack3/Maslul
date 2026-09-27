@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.Work
 import androidx.compose.material3.Icon
@@ -61,6 +62,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.maslul.app.data.Place
 import com.maslul.app.data.PlaceKind
+import com.maslul.app.data.favoriteFor
 import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
 import com.maslul.app.ui.components.MessageBox
@@ -154,6 +156,7 @@ fun SearchScreen(model: SearchModel) {
     val data by model.store.data.collectAsState()
     val fromFocus = remember { FocusRequester() }
     val toFocus = remember { FocusRequester() }
+    var draft by remember { mutableStateOf<FavoriteDraft?>(null) }
     LaunchedEffect(Unit) {
         runCatching { if (model.editing == SearchField.FROM) fromFocus.requestFocus() else toFocus.requestFocus() }
     }
@@ -213,7 +216,10 @@ fun SearchScreen(model: SearchModel) {
                     item { MessageBox("No results", body = "Try a street, city or place name — Hebrew or English.", icon = Icons.Rounded.Place) }
                 }
                 items(model.results, key = { "r" + it.key + it.kind }) { p ->
-                    PlaceRow(p.name, p.subtitle, icon = kindIcon(p.kind), iconTint = kindTint(p.kind)) { model.choose(p) }
+                    PlaceRow(p.name, p.subtitle, icon = kindIcon(p.kind), iconTint = kindTint(p.kind),
+                        trailing = if (model.single) null else ({ FavoriteStar(data.favoriteFor(p) != null) { draft = FavoriteDraft.of(model.store, p) } }),
+                        onLongClick = { draft = FavoriteDraft.of(model.store, p) },
+                    ) { model.choose(p) }
                 }
             } else {
                 if (!model.single) {
@@ -227,17 +233,36 @@ fun SearchScreen(model: SearchModel) {
                 if (!model.single) {
                     data.home?.let { h -> item { PlaceRow("Home", h.name, icon = Icons.Rounded.Home) { model.choose(h) } } }
                     data.work?.let { w -> item { PlaceRow("Work", w.name, icon = Icons.Rounded.Work) { model.choose(w) } } }
-                    if (data.favorites.isNotEmpty()) item { SectionHeader("Favorites") }
-                    items(data.favorites, key = { "f" + it.key }) { p ->
-                        PlaceRow(p.name, p.subtitle, icon = Icons.Rounded.Star) { model.choose(p) }
-                    }
+                }
+                if (data.favoritePlaces.isNotEmpty()) item { SectionHeader("Favorites") }
+                items(data.favoritePlaces, key = { "f" + it.key }) { f ->
+                    PlaceRow(f.label, if (f.label == f.place.name) f.place.subtitle else f.place.name,
+                        icon = f.icon.vector(), iconTint = MaterialTheme.colorScheme.primary,
+                        onLongClick = { draft = FavoriteDraft.of(model.store, f.place) },
+                    ) { model.choose(f.place) }
                 }
                 if (data.recents.isNotEmpty()) item { SectionHeader("Recent") }
                 items(data.recents, key = { "h" + it.key }) { p ->
-                    PlaceRow(p.name, p.subtitle, icon = Icons.Rounded.History) { model.choose(p) }
+                    PlaceRow(p.name, p.subtitle, icon = Icons.Rounded.History,
+                        trailing = if (model.single) null else ({ FavoriteStar(data.favoriteFor(p) != null) { draft = FavoriteDraft.of(model.store, p) } }),
+                        onLongClick = { draft = FavoriteDraft.of(model.store, p) },
+                    ) { model.choose(p) }
                 }
             }
         }
+    }
+    FavoriteDialogHost(model.store, draft) { draft = null }
+}
+
+@Composable
+private fun FavoriteStar(saved: Boolean, onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
+        Icon(
+            if (saved) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+            if (saved) "Edit favorite" else "Save as favorite",
+            tint = if (saved) FavoriteGold else LocalExtra.current.subtle,
+            modifier = Modifier.size(20.dp),
+        )
     }
 }
 

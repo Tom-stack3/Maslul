@@ -30,12 +30,14 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.DirectionsWalk
 import androidx.compose.material.icons.automirrored.rounded.Accessible
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -58,6 +60,7 @@ import androidx.compose.material3.TimeInput
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -73,6 +76,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.maslul.app.data.GeoPoint
 import com.maslul.app.data.IsraelZone
 import com.maslul.app.data.Itinerary
@@ -80,6 +86,7 @@ import com.maslul.app.data.LiveCall
 import com.maslul.app.data.LiveStatus
 import com.maslul.app.data.Place
 import com.maslul.app.data.PlaceKind
+import com.maslul.app.data.Ranking
 import com.maslul.app.data.SavedTrip
 import com.maslul.app.data.TransitMode
 import com.maslul.app.data.TransitousApi
@@ -127,8 +134,14 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
     private var fromPoint: GeoPoint? = null
     private var toPoint: GeoPoint? = null
     val live = mutableStateMapOf<String, LiveCall>()
+    /** When the current results were loaded, to refresh stale "leave now" searches. */
+    private var searchedAt: Instant = Instant.EPOCH
 
     init { search() }
+
+    private val walkMps get() = store.data.value.settings.walkSpeed.mps
+    private fun ranked(list: List<Itinerary>) = Ranking.rank(list, timeMode == TimeMode.ARRIVE, walkMps)
+    fun riskiest(itin: Itinerary) = Ranking.riskiest(itin, walkMps)
 
     private suspend fun resolve(p: Place): GeoPoint? =
         if (p.kind == PlaceKind.CURRENT_LOCATION) location.current() ?: location.last.value else p.point
@@ -157,6 +170,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             itineraries = emptyList()
             walkOnly = null
             live.clear()
+            searchedAt = Instant.now()
             fromPoint = resolve(from)
             toPoint = resolve(to)
             if (fromPoint == null || toPoint == null) {
@@ -166,7 +180,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             }
             runCatching { repo.plan(request()!!) }
                 .onSuccess { r ->
-                    itineraries = r.itineraries
+                    itineraries = ranked(r.itineraries)
                     walkOnly = r.walkOnly?.takeIf { it.durationSec < 45 * 60 }
                     nextCursor = r.nextCursor
                     prevCursor = r.previousCursor
@@ -185,7 +199,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             runCatching { repo.plan(request(cursor)!!) }.onSuccess { r ->
                 val known = itineraries.map { it.id }.toSet()
                 val fresh = r.itineraries.filter { it.id !in known }
-                itineraries = (if (later) itineraries + fresh else fresh + itineraries).sortedBy { it.start }
+                itineraries = ranked(if (later) itineraries + fresh else fresh + itineraries)
                 if (later) nextCursor = r.nextCursor else prevCursor = r.previousCursor
             }
             loadingMore = false
@@ -208,6 +222,17 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             delay(25_000)
             refreshLive()
         }
+    }
+
+    /** Re-runs the search from now (the screen may have sat open for a while). */
+    fun refreshNow() {
+        timeMode = TimeMode.NOW
+        time = null
+        search()
+    }
+
+    fun refreshIfStale() {
+        if (timeMode == TimeMode.NOW && !loading && Instant.now().isAfter(searchedAt.plusSeconds(150))) search()
     }
 
     fun edit(field: SearchField) {
@@ -245,6 +270,13 @@ fun RoutesScreen(model: RoutesModel) {
     var now by remember { mutableStateOf(Instant.now()) }
     LaunchedEffect(Unit) { model.liveLoop() }
     LaunchedEffect(Unit) { while (true) { delay(15_000); now = Instant.now() } }
+    // Coming back to a "leave now" search after a while re-runs it.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) model.refreshIfStale() }
+        lifecycle.addObserver(obs)
+        onDispose { lifecycle.removeObserver(obs) }
+    }
 
     val fastest = model.itineraries.minByOrNull { it.durationSec }?.id
     val leastWalk = model.itineraries.takeIf { it.size > 2 }?.minByOrNull { it.walkSec }?.id
@@ -296,6 +328,13 @@ fun RoutesScreen(model: RoutesModel) {
                         FilterChip(selected = true, onClick = { showOptions = true }, label = { Text("Accessible") },
                             leadingIcon = { Icon(Icons.AutoMirrored.Rounded.Accessible, null, Modifier.size(18.dp)) })
                     }
+                    AssistChip(
+                        onClick = model::refreshNow,
+                        enabled = !model.loading,
+                        label = { Text("Refresh") },
+                        leadingIcon = { Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp)) },
+                        modifier = Modifier.testTag("refresh_chip"),
+                    )
                 }
             }
         }
@@ -317,10 +356,12 @@ fun RoutesScreen(model: RoutesModel) {
                 }
                 items(model.itineraries, key = { it.id }) { itin ->
                     val tags = buildList {
+                        // Ranked list: the first card is the recommended option.
+                        if (itin === model.itineraries.first() && model.itineraries.size > 1) add("Best")
                         if (itin.id == fastest) add("Fastest")
                         if (itin.id == leastWalk && itin.id != fastest) add("Least walking")
                     }
-                    ItineraryCard(itin, model.live[itin.id], now, tags) { model.open(itin) }
+                    ItineraryCard(itin, model.live[itin.id], now, tags, model.riskiest(itin)) { model.open(itin) }
                 }
                 item {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -380,7 +421,14 @@ fun timeLabel(mode: TimeMode, t: ZonedDateTime?): String {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ItineraryCard(itin: Itinerary, live: LiveCall?, now: Instant, tags: List<String>, onClick: () -> Unit) {
+fun ItineraryCard(
+    itin: Itinerary,
+    live: LiveCall?,
+    now: Instant,
+    tags: List<String>,
+    risk: Ranking.Transfer? = null,
+    onClick: () -> Unit,
+) {
     val x = LocalExtra.current
     val first = itin.firstTransit
     // Walking time before boarding, so "leave in" can follow the live vehicle.
@@ -451,6 +499,10 @@ fun ItineraryCard(itin: Itinerary, live: LiveCall?, now: Instant, tags: List<Str
                 Spacer(Modifier.height(12.dp))
                 LiveLine(first.lineLabel, first.mode, first.from.name, live, first.start, now)
             }
+            if (risk != null) {
+                Spacer(Modifier.height(8.dp))
+                TransferWarning(risk)
+            }
             if (itin.legs.any { it.alerts.isNotEmpty() }) {
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -460,6 +512,22 @@ fun ItineraryCard(itin: Itinerary, live: LiveCall?, now: Instant, tags: List<Str
                 }
             }
         }
+    }
+}
+
+/** "⚠ Tight transfer · 2 min to 143" — the connection may be missed if a bus runs off schedule. */
+@Composable
+fun TransferWarning(t: Ranking.Transfer, modifier: Modifier = Modifier) {
+    val min = t.slackSec.coerceAtLeast(0) / 60
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Rounded.WarningAmber, null, tint = Color(0xFFF5A524), modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(
+            "Tight transfer · ${if (min < 1) "under 1 min" else "$min min"} to catch ${t.next.lineLabel}" +
+                (if (t.walking) " after a ${Fmt.distance(t.walkM)} walk" else ""),
+            style = MaterialTheme.typography.bodySmall,
+            color = LocalExtra.current.subtle,
+        )
     }
 }
 

@@ -23,6 +23,10 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
         val maxTransfers: Int? = null,
         val pageCursor: String? = null,
         val language: String? = null,
+        /** Buffer for every change, so a slightly late bus doesn't break the connection. */
+        val minTransferMinutes: Int = 2,
+        val additionalTransferMinutes: Int = 1,
+        val numItineraries: Int = 8,
     )
 
     suspend fun plan(req: PlanRequest): PlanResult {
@@ -30,7 +34,9 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
             .addPathSegments("api/v6/plan")
             .addQueryParameter("fromPlace", "${req.from.lat},${req.from.lon}")
             .addQueryParameter("toPlace", "${req.to.lat},${req.to.lon}")
-            .addQueryParameter("numItineraries", "6")
+            .addQueryParameter("numItineraries", req.numItineraries.toString())
+            .addQueryParameter("minTransferTime", req.minTransferMinutes.toString())
+            .addQueryParameter("additionalTransferTime", req.additionalTransferMinutes.toString())
             .addQueryParameter("arriveBy", req.arriveBy.toString())
             .addQueryParameter("pedestrianSpeed", req.walkSpeedMps.toString())
             .addQueryParameter("maxPreTransitTime", (req.maxWalkMinutes * 60).toString())

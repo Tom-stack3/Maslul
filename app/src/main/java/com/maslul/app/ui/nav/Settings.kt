@@ -96,7 +96,7 @@ fun SettingsScreen(model: SettingsModel) {
                     "• Routes & timetables: Israel Ministry of Transport GTFS, routed by Transitous (transitous.org).\n" +
                     "• Live vehicles: Ministry of Transport SIRI feed, published by Open Bus / The Public Knowledge Workshop (Hasadna).\n" +
                     "• Line search & daily schedules: Open Bus Stride API.\n" +
-                    "• Search: Transitous and Photon (komoot), OpenStreetMap data.\n" +
+                    "• Search: Transitous, Photon (komoot) and Nominatim, OpenStreetMap data.\n" +
                     "• Maps: OpenFreeMap, © OpenStreetMap contributors.\n\n" +
                     "Live arrival times are estimated from each vehicle's reported position and are typically 30–90 s behind real time.",
                 style = MaterialTheme.typography.bodyMedium,

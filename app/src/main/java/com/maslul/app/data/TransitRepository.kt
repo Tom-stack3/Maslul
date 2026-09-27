@@ -22,10 +22,14 @@ data class StopArrival(val time: Instant, val live: Boolean, val delaySec: Long,
 
 data class BoardEntry(val departure: Departure, val live: LiveCall?)
 
+/** A line (one direction) serving a stop near the user, with its next departures there. */
+data class NearbyLine(val departure: Departure, val stop: Place, val distanceM: Double, val next: List<Instant>)
+
 class TransitRepository(
     val transitous: TransitousApi = TransitousApi(),
     private val photon: PhotonApi = PhotonApi(),
     private val stride: StrideApi = StrideApi(),
+    private val nominatim: NominatimApi = NominatimApi(),
     val live: LiveRepository = LiveRepository(),
 ) {
     private val tripCache = object : LinkedHashMap<String, Leg>(64, 0.75f, true) {
@@ -37,9 +41,17 @@ class TransitRepository(
     // ---- Places ---------------------------------------------------------------------
 
     suspend fun searchPlaces(text: String, near: GeoPoint?): List<Place> = coroutineScope {
-        val a = async { runCatching { transitous.geocode(text, near, language) }.getOrDefault(emptyList()) }
-        val b = async { runCatching { photon.search(text, near) }.getOrDefault(emptyList()) }
-        mergePlaces(a.await(), b.await())
+        val q = AddressSearch.parse(text)
+        val a = async { runCatching { transitous.geocode(q.text, near, language) }.getOrDefault(emptyList()) }
+        val b = async { runCatching { photon.search(q.text, near) }.getOrDefault(emptyList()) }
+        // With a house number, also look up the bare street in case the number isn't mapped.
+        val c = q.number?.let { async { runCatching { photon.search(q.rest, near) }.getOrDefault(emptyList()) } }
+        val merged = mergePlaces(a.await(), b.await())
+        if (c == null) return@coroutineScope merged
+        val candidates = merged + c.await()
+        AddressSearch.resolve(q, candidates)?.let { return@coroutineScope it.take(14) }
+        val n = runCatching { nominatim.search(q.text) }.getOrDefault(emptyList())
+        (AddressSearch.resolve(q, n + candidates) ?: merged).take(14)
     }
 
     suspend fun reverseGeocode(p: GeoPoint): Place? = runCatching { transitous.reverseGeocode(p) }.getOrNull()
@@ -69,6 +81,18 @@ class TransitRepository(
         val v = vehicles.forTrip(parsed.tripNumber, parsed.originDeparture)
         val origin = calls.first().scheduledTime ?: parsed.originDeparture
         return LiveCalls.compute(timeline, origin, board, alight, v, now)
+    }
+
+    /** Route and stops from a live vehicle up to [leg]'s boarding stop, so the bus isn't drawn floating. */
+    suspend fun approach(leg: Leg, call: LiveCall): LiveApproach? {
+        val p = call.progress?.takeIf { call.status == LiveStatus.LIVE } ?: return null
+        val trip = trip(leg.tripId ?: return null) ?: return null
+        val timeline = TripTimeline.fromTrip(trip) ?: return null
+        val calls = listOf(trip.from) + trip.intermediateStops + trip.to
+        val board = indexOfStop(calls, leg.from) ?: return null
+        val path = timeline.slice(p.alongM, timeline.stopAlong[board])
+        val stops = calls.subList((p.lastPassed + 1).coerceIn(0, board), board).map { it.point }
+        return LiveApproach(path.ifEmpty { listOf(p.vehicle.point, leg.from.point) }, stops)
     }
 
     /** The full trip plus its live vehicle progress, for the trip screen. */
@@ -119,6 +143,33 @@ class TransitRepository(
     }
 
     // ---- Lines ----------------------------------------------------------------------
+
+    /** Lines leaving from the stops nearest to [here], each at its closest stop. */
+    suspend fun nearbyLines(here: GeoPoint, stops: List<Place>, now: Instant = Instant.now()): List<NearbyLine> = coroutineScope {
+        stops.filter { it.stopId != null }.take(8)
+            .map { st -> async { runCatching { st to transitous.stopTimes(st.stopId!!, count = 25, language = language) }.getOrNull() } }
+            .awaitAll().filterNotNull()
+            .flatMap { (st, deps) ->
+                val d = GeoMath.distance(here, st.point)
+                deps.filter { it.scheduled.isAfter(now.minusSeconds(60)) }.map { Triple(st, d, it) }
+            }
+            .groupBy { (_, _, dep) -> "${dep.routeId ?: dep.lineLabel}|${dep.headsign}" }
+            .values.map { g ->
+                val nearest = g.minOf { it.second }
+                val atStop = g.filter { it.second == nearest }.sortedBy { it.third.scheduled }
+                NearbyLine(atStop.first().third, atStop.first().first, nearest, atStop.take(3).map { it.third.scheduled })
+            }
+            // Group by ~100 m bands so nearby stops mix, then soonest first.
+            .sortedWith(compareBy({ (it.distanceM / 100).toInt() }, { it.next.first() }))
+    }
+
+    /** Resolves a GTFS route id (from a departure) to today's Stride line route. */
+    suspend fun lineRoute(routeId: String?): LineRoute? {
+        val ref = TripIds.lineRef(routeId)?.toLongOrNull() ?: return null
+        val today = LocalDate.now(IsraelZone)
+        return stride.routesByLineRef(listOf(ref), today).firstOrNull()
+            ?: stride.routesByLineRef(listOf(ref), today.minusDays(1)).firstOrNull()
+    }
 
     suspend fun searchLines(query: String, mode: TransitMode?): List<Line> {
         val today = LocalDate.now(IsraelZone)

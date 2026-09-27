@@ -33,6 +33,9 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AlarmAdd
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
+import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Navigation
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Stop
@@ -40,6 +43,7 @@ import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
@@ -57,11 +61,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -69,6 +75,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.maslul.app.data.Itinerary
 import com.maslul.app.data.Leg
+import com.maslul.app.data.LiveApproach
+import com.maslul.app.data.Ranking
 import com.maslul.app.data.LiveCall
 import com.maslul.app.data.LiveStatus
 import com.maslul.app.data.Place
@@ -82,6 +90,7 @@ import com.maslul.app.ui.ScreenModel
 import com.maslul.app.ui.components.Fmt
 import com.maslul.app.ui.components.LineBadge
 import com.maslul.app.ui.components.LiveDot
+import com.maslul.app.ui.components.MapController
 import com.maslul.app.ui.components.MapLine
 import com.maslul.app.ui.components.MapMarker
 import com.maslul.app.ui.components.MapVehicle
@@ -105,13 +114,23 @@ import java.time.Instant
 
 class RouteDetailModel(nav: AppNav, val itinerary: Itinerary, val from: Place, val to: Place) : ScreenModel(nav) {
     val live = mutableStateMapOf<Int, LiveCall>()
+    val approach = mutableStateMapOf<Int, LiveApproach>()
+    private val transfers = Ranking.transfers(itinerary, store.data.value.settings.walkSpeed.mps)
+
+    /** A tight connection onto [leg], if the previous vehicle leaves little spare time. */
+    fun tightTransferInto(leg: Leg) = transfers.firstOrNull { it.next === leg && it.tight }
 
     suspend fun liveLoop() {
         while (true) {
             val now = Instant.now()
             itinerary.legs.forEachIndexed { i, leg ->
                 if (leg.mode.isTransit && leg.end.isAfter(now.minusSeconds(300))) {
-                    scope.launch { runCatching { repo.legLive(leg, now) }.getOrNull()?.let { live[i] = it } }
+                    scope.launch {
+                        val call = runCatching { repo.legLive(leg, now) }.getOrNull() ?: return@launch
+                        live[i] = call
+                        val a = runCatching { repo.approach(leg, call) }.getOrNull()
+                        if (a != null) approach[i] = a else approach.remove(i)
+                    }
                 }
             }
             delay(20_000)
@@ -186,8 +205,13 @@ fun RouteDetailScreen(model: RouteDetailModel) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val peek = maxHeight * 0.52f
         val scaffold = rememberBottomSheetScaffoldState(
-            bottomSheetState = rememberStandardBottomSheetState(initialValue = SheetValue.PartiallyExpanded),
+            // Dragging the sheet all the way down shows the map full screen.
+            bottomSheetState = rememberStandardBottomSheetState(initialValue = SheetValue.PartiallyExpanded, skipHiddenState = false),
         )
+        val sheet = scaffold.bottomSheetState
+        val mapOnly = sheet.currentValue == SheetValue.Hidden && sheet.targetValue == SheetValue.Hidden
+        val scope = rememberCoroutineScope()
+        val mapController = remember { MapController() }
         BottomSheetScaffold(
             scaffoldState = scaffold,
             sheetPeekHeight = peek,
@@ -227,18 +251,45 @@ fun RouteDetailScreen(model: RouteDetailModel) {
             },
         ) {
             Box(Modifier.fillMaxSize()) {
-                RouteMap(model, Modifier.fillMaxSize(), PaddingValues(top = 60.dp, bottom = peek))
+                RouteMap(model, Modifier.fillMaxSize(), PaddingValues(top = 60.dp, bottom = if (mapOnly) 72.dp else peek),
+                    mapController, fitTag = mapOnly)
                 FilledTonalIconButton(
                     onClick = { model.nav.pop() },
                     modifier = Modifier.statusBarsPadding().padding(12.dp),
                 ) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+                Column(
+                    Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilledTonalIconButton(
+                        onClick = { scope.launch { if (mapOnly) sheet.partialExpand() else sheet.hide() } },
+                        modifier = Modifier.testTag("map_expand"),
+                    ) { Icon(if (mapOnly) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen, if (mapOnly) "Show details" else "Expand map") }
+                    FilledTonalIconButton(
+                        onClick = {
+                            // Jump to the last fix right away, then to a fresh one.
+                            model.location.last.value?.let { mapController.moveTo(it, 15.5) }
+                            model.scope.launch { model.location.current()?.let { mapController.moveTo(it, 15.5) } }
+                        },
+                        modifier = Modifier.testTag("map_my_location"),
+                    ) { Icon(Icons.Rounded.MyLocation, "My location", tint = MaterialTheme.colorScheme.primary) }
+                }
+                if (mapOnly) {
+                    ExtendedFloatingActionButton(
+                        onClick = { scope.launch { sheet.partialExpand() } },
+                        icon = { Icon(Icons.Rounded.ExpandLess, null) },
+                        text = { Text("Trip details") },
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp),
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun RouteMap(model: RouteDetailModel, modifier: Modifier, padding: PaddingValues) {
+private fun RouteMap(model: RouteDetailModel, modifier: Modifier, padding: PaddingValues, controller: MapController, fitTag: Boolean) {
     val x = LocalExtra.current
     val user by model.location.last.collectAsState()
     val itin = model.itinerary
@@ -266,15 +317,26 @@ private fun RouteMap(model: RouteDetailModel, modifier: Modifier, padding: Paddi
         val leg = itin.legs[i]
         MapVehicle("v$i", v.point, v.bearing, lineColor(leg.mode, leg.routeColor), leg.lineLabel)
     }
+    // The live vehicle's way to the boarding stop, faded so it reads as "not your ride yet".
+    val bg = MaterialTheme.colorScheme.background
+    val approach = model.approach.entries.map { (i, a) ->
+        val leg = itin.legs[i]
+        val c = lerp(lineColor(leg.mode, leg.routeColor), bg, 0.45f)
+        MapLine(a.path, c, 5f, dashed = true) to a.stops.map { MapMarker(it, c, MarkerKind.STOP_SMALL) }
+    }
+    val route = remember(itin) { itin.legs.flatMap { it.geometry.ifEmpty { listOf(it.from.point, it.to.point) } } }
+    val hasApproach = model.approach.isNotEmpty()
     TransitMap(
         modifier = modifier,
-        lines = lines,
-        markers = markers,
+        lines = approach.map { it.first } + lines,
+        markers = approach.flatMap { it.second } + markers,
         vehicles = vehicles,
         user = user,
-        fitPoints = remember(itin) { itin.legs.flatMap { it.geometry.ifEmpty { listOf(it.from.point, it.to.point) } } },
-        fitKey = itin.id,
+        // Refit once the live vehicle shows up so it's in view too.
+        fitPoints = route + model.approach.values.flatMap { it.path.take(1) },
+        fitKey = "${itin.id}-$fitTag-$hasApproach",
         contentPadding = padding,
+        controller = controller,
     )
 }
 
@@ -352,6 +414,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
                 ) {
                     Text(leg.from.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
                     leg.from.track?.let { Text("Platform $it", style = MaterialTheme.typography.bodySmall, color = x.subtle) }
+                    model.tightTransferInto(leg)?.let { TransferWarning(it, Modifier.padding(top = 4.dp)) }
                 }
                 TransitSegment(model, leg, rail, live, now)
                 // Alighting

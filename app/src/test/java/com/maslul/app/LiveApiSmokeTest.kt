@@ -1,8 +1,11 @@
 package com.maslul.app
 
+import com.maslul.app.data.GeoMath
 import com.maslul.app.data.GeoPoint
 import com.maslul.app.data.IsraelZone
 import com.maslul.app.data.LiveStatus
+import com.maslul.app.data.Ranking
+import com.maslul.app.data.TransitMode
 import com.maslul.app.data.TransitRepository
 import com.maslul.app.data.TransitousApi
 import kotlinx.coroutines.runBlocking
@@ -35,6 +38,42 @@ class LiveApiSmokeTest {
         val en = repo.searchPlaces("azrieli", GeoPoint(32.08, 34.78))
         println("he: ${he.take(3).map { it.name }} en: ${en.take(3).map { it.name }}")
         assertTrue(he.isNotEmpty() && en.isNotEmpty())
+    }
+
+    @Test
+    fun findsStreetWithUnmappedHouseNumber() = runBlocking {
+        val r = repo.searchPlaces("המגינים 14 פתח תקווה", GeoPoint(32.0741, 34.7922))
+        println("house number: ${r.take(4).map { "${it.name} (${it.subtitle})" }}")
+        val top = r.first()
+        assertTrue(top.name.startsWith("המגינים") && top.name.contains("14"))
+        // The street is in Ein Ganim, Petah Tikva.
+        assertTrue(GeoMath.distance(top.point, GeoPoint(32.087, 34.897)) < 1500)
+        val exact = repo.searchPlaces("דיזנגוף 50 תל אביב", null)
+        println("exact: ${exact.take(3).map { "${it.name} (${it.subtitle})" }}")
+        assertTrue(exact.first().name.contains("50"))
+    }
+
+    @Test
+    fun ranksAndFlagsTransfers() = runBlocking {
+        // North Tel Aviv → Azrieli: a mix of direct and one-transfer options.
+        val r = repo.plan(TransitousApi.PlanRequest(GeoPoint(32.0980, 34.7780), GeoPoint(32.0745, 34.7920)))
+        val ranked = Ranking.rank(r.itineraries, arriveBy = false)
+        assertTrue(ranked.isNotEmpty())
+        ranked.forEach { i ->
+            val lines = i.transitLegs.joinToString(">") { it.lineLabel }
+            println("${i.start}–${i.end} t${i.transfers} $lines risk=${Ranking.riskiest(i)?.slackSec}")
+        }
+    }
+
+    @Test
+    fun findsNearbyLines() = runBlocking {
+        val here = GeoPoint(32.0741, 34.7922)
+        val lines = repo.nearbyLines(here, repo.nearbyStops(here))
+        assertTrue(lines.isNotEmpty())
+        lines.take(5).forEach { println("${it.departure.lineLabel} → ${it.departure.headsign} at ${it.stop.name} ${it.distanceM.toInt()} m ${it.next}") }
+        val route = repo.lineRoute(lines.first { it.departure.mode == TransitMode.BUS }.departure.routeId)
+        println("resolved: ${route?.label} ${route?.destination}")
+        assertTrue(route != null)
     }
 
     @Test

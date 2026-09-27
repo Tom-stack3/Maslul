@@ -101,7 +101,10 @@ fun AppShell(nav: AppNav) {
                         (slideOutHorizontally(tween(260)) { -it * dir / 4 } + fadeOut(tween(160)))
                 },
                 label = "screens",
-            ) { screen -> ScreenHost(screen) }
+            ) { screen ->
+                // Gives every screen the theme's content colour (plain Text would default to black).
+                Surface(color = MaterialTheme.colorScheme.background) { ScreenHost(screen) }
+            }
 
             // Ongoing live trip, reachable from anywhere.
             val s = session

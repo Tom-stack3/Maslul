@@ -1,5 +1,6 @@
 package com.maslul.app.ui.lines
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -39,11 +40,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -51,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.maslul.app.data.GeoMath
 import com.maslul.app.data.Line
+import com.maslul.app.data.NearbyLine
 import com.maslul.app.data.LineRoute
 import com.maslul.app.data.Place
 import com.maslul.app.data.TransitMode
@@ -61,10 +65,13 @@ import com.maslul.app.ui.components.LineBadge
 import com.maslul.app.ui.components.MessageBox
 import com.maslul.app.ui.components.PlaceRow
 import com.maslul.app.ui.components.SectionHeader
+import com.maslul.app.ui.components.lineColor
 import com.maslul.app.ui.components.modeIcon
 import com.maslul.app.ui.components.modeName
 import com.maslul.app.ui.theme.LocalExtra
 import com.maslul.app.ui.theme.ModeColors
+import com.maslul.app.ui.theme.Numeric
+import java.time.Instant
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -77,6 +84,8 @@ class LinesHomeModel(nav: AppNav) : ScreenModel(nav) {
     var error by mutableStateOf<String?>(null)
     var nearby by mutableStateOf<List<Place>>(emptyList())
     var nearbyLoading by mutableStateOf(false)
+    var nearbyLines by mutableStateOf<List<NearbyLine>>(emptyList())
+    var linesLoading by mutableStateOf(false)
     private var job: Job? = null
 
     val showsResults get() = query.isNotBlank() || mode == TransitMode.TRAIN || mode == TransitMode.LIGHT_RAIL
@@ -110,8 +119,20 @@ class LinesHomeModel(nav: AppNav) : ScreenModel(nav) {
         scope.launch {
             nearbyLoading = true
             val here = location.current() ?: location.last.value
-            if (here != null) runCatching { repo.nearbyStops(here) }.onSuccess { nearby = it.take(12) }
+            val stops = here?.let { runCatching { repo.nearbyStops(it) }.getOrNull() }
+            if (stops != null) nearby = stops.take(12)
             nearbyLoading = false
+            if (here != null && stops != null) {
+                linesLoading = true
+                runCatching { repo.nearbyLines(here, stops) }.onSuccess { nearbyLines = it }
+                linesLoading = false
+            }
+        }
+    }
+
+    fun openLine(l: NearbyLine, onFail: () -> Unit) {
+        scope.launch {
+            runCatching { repo.lineRoute(l.departure.routeId) }.getOrNull()?.let(::open) ?: onFail()
         }
     }
 
@@ -123,7 +144,10 @@ class LinesHomeModel(nav: AppNav) : ScreenModel(nav) {
 fun LinesHomeScreen(model: LinesHomeModel) {
     val data by model.store.data.collectAsState()
     val here by model.location.last.collectAsState()
+    val ctx = LocalContext.current
+    var now by remember { mutableStateOf(Instant.now()) }
     LaunchedEffect(Unit) { model.loadNearby() }
+    LaunchedEffect(Unit) { while (true) { delay(20_000); now = Instant.now() } }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(Modifier.background(MaterialTheme.colorScheme.surface).statusBarsPadding()) {
@@ -191,6 +215,16 @@ fun LinesHomeScreen(model: LinesHomeModel) {
                         PlaceRow(p.name, p.subtitle, icon = Icons.Rounded.Star, iconTint = ModeColors.Bus) { model.openStop(p) }
                     }
                 }
+                val lines = model.nearbyLines.filter { model.mode == null || it.departure.mode == model.mode }
+                if (lines.isNotEmpty() || model.linesLoading) {
+                    item { SectionHeader("Nearby lines") }
+                    if (lines.isEmpty()) item { com.maslul.app.ui.components.LoadingBox() }
+                    items(lines.take(10), key = { "nl-${it.departure.routeId}-${it.departure.headsign}" }) { l ->
+                        NearbyLineRow(l, now) {
+                            model.openLine(l) { Toast.makeText(ctx, "Line details unavailable", Toast.LENGTH_SHORT).show() }
+                        }
+                    }
+                }
                 item { SectionHeader("Nearby stations", action = "Refresh", onAction = model::loadNearby) }
                 if (model.nearby.isEmpty()) {
                     item {
@@ -215,6 +249,33 @@ fun LinesHomeScreen(model: LinesHomeModel) {
 }
 
 @Composable
+private fun NearbyLineRow(l: NearbyLine, now: Instant, onClick: () -> Unit) {
+    val d = l.departure
+    val x = LocalExtra.current
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.widthIn(min = 64.dp)) { LineBadge(d.lineLabel, d.mode, color = lineColor(d.mode, d.routeColor)) }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("to ${d.headsign}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("${Fmt.distance(l.distanceM)} · ${l.stop.name}", style = MaterialTheme.typography.bodySmall, color = x.subtle,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(horizontalAlignment = Alignment.End) {
+            Text(Fmt.relative(l.next.first(), now), style = MaterialTheme.typography.titleSmall.merge(Numeric),
+                color = MaterialTheme.colorScheme.onSurface)
+            l.next.getOrNull(1)?.let {
+                Text("then ${Fmt.time(it)}", style = MaterialTheme.typography.labelSmall.merge(Numeric), color = x.subtle)
+            }
+        }
+    }
+}
+
+@Composable
 fun LineRow(r: LineRoute, variants: Int = 1, favorite: Boolean = false, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
@@ -224,11 +285,13 @@ fun LineRow(r: LineRoute, variants: Int = 1, favorite: Boolean = false, onClick:
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             if (r.destination.isNotBlank()) {
-                Text(r.destination, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(r.destination, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(r.origin, style = MaterialTheme.typography.bodySmall, color = LocalExtra.current.subtle,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             } else {
-                Text(r.longName, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(r.longName, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(r.agency, style = MaterialTheme.typography.labelMedium, color = LocalExtra.current.subtle)

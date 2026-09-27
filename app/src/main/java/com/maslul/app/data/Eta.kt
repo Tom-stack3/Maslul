@@ -113,6 +113,15 @@ class TripTimeline(
         return line.last()
     }
 
+    /** The part of [line] between two distances along it. */
+    fun slice(fromM: Double, toM: Double): List<GeoPoint> {
+        if (line.size < 2 || toM <= fromM) return emptyList()
+        val out = arrayListOf(pointAt(fromM))
+        for (i in line.indices) if (cum[i] > fromM && cum[i] < toM) out += line[i]
+        out += pointAt(toM)
+        return out
+    }
+
     companion object {
         /** Timeline for a trip returned by the planner (all stops with scheduled times). */
         fun fromTrip(trip: Leg): TripTimeline? {
@@ -134,6 +143,9 @@ class TripTimeline(
         )
     }
 }
+
+/** Where a live vehicle still has to go before reaching the boarding stop. */
+data class LiveApproach(val path: List<GeoPoint>, val stops: List<GeoPoint>)
 
 enum class LiveStatus {
     /** Vehicle is tracked and heading to the stop. */

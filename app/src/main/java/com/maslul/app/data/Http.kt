@@ -1,0 +1,63 @@
+package com.maslul.app.data
+
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.json.Json
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.HttpUrl
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+val AppJson = Json {
+    ignoreUnknownKeys = true
+    isLenient = true
+    coerceInputValues = true
+    explicitNulls = false
+}
+
+class HttpException(val code: Int, message: String) : IOException(message)
+
+object Http {
+    /** Community services ask clients to identify themselves. */
+    const val USER_AGENT = "Maslul/1.0 (personal Android transit app)"
+
+    val client: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .addInterceptor { chain ->
+                chain.proceed(chain.request().newBuilder().header("User-Agent", USER_AGENT).build())
+            }
+            .build()
+    }
+
+    suspend fun execute(request: Request): Response = suspendCancellableCoroutine { cont ->
+        val call = client.newCall(request)
+        cont.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (cont.isActive) cont.resumeWithException(e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                cont.resume(response)
+            }
+        })
+    }
+
+    suspend fun getString(url: HttpUrl): String {
+        val response = execute(Request.Builder().url(url).build())
+        response.use {
+            if (!it.isSuccessful) throw HttpException(it.code, "HTTP ${it.code} for ${url.encodedPath}")
+            return it.body!!.string()
+        }
+    }
+
+    suspend inline fun <reified T> getJson(url: HttpUrl): T =
+        AppJson.decodeFromString<T>(getString(url))
+}

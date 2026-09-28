@@ -31,6 +31,8 @@ data class Extra(
     val subtle: Color,
     val divider: Color,
     val isDark: Boolean,
+    /** Live data that stopped updating (amber); readable on both surfaces. */
+    val stale: Color = Color(0xFFB45309),
 )
 
 val LocalExtra = staticCompositionLocalOf {
@@ -127,7 +129,8 @@ fun MaslulTheme(mode: ThemeMode = ThemeMode.SYSTEM, content: @Composable () -> U
         ThemeMode.DARK -> true
     }
     val extra = if (dark) {
-        Extra(Color(0xFF3DD68C), Color(0xFFFF6B6B), Color(0xFF6EA8FF), Color(0xFF7D8696), Color(0xFF9AA3B2), Color(0x1FFFFFFF), true)
+        Extra(Color(0xFF3DD68C), Color(0xFFFF6B6B), Color(0xFF6EA8FF), Color(0xFF7D8696), Color(0xFF9AA3B2), Color(0x1FFFFFFF), true,
+            stale = Color(0xFFF5B942))
     } else {
         Extra(Color(0xFF12A150), Color(0xFFE5484D), Color(0xFF1F6FEB), Color(0xFF8A94A6), Color(0xFF6B7280), Color(0x14000000), false)
     }

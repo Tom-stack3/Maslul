@@ -75,7 +75,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -84,7 +87,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.maslul.app.data.GeoPoint
 import com.maslul.app.data.IsraelZone
 import com.maslul.app.data.Itinerary
+import com.maslul.app.data.Freshness
 import com.maslul.app.data.LiveCall
+import com.maslul.app.data.freshness
 import com.maslul.app.data.LiveStatus
 import com.maslul.app.data.Place
 import com.maslul.app.data.PlaceKind
@@ -99,7 +104,9 @@ import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
 import com.maslul.app.ui.components.Fmt
 import com.maslul.app.ui.components.LineBadge
-import com.maslul.app.ui.components.LiveDot
+import com.maslul.app.ui.components.LiveSignal
+import com.maslul.app.ui.components.freshnessColor
+import com.maslul.app.ui.lines.TripModel
 import com.maslul.app.ui.components.LoadingBox
 import com.maslul.app.ui.components.MessageBox
 import com.maslul.app.ui.components.Pill
@@ -263,6 +270,13 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
     fun toggleSaved() = store.toggleSavedTrip(SavedTrip(from, to))
 
     fun open(it: Itinerary) = nav.push(RouteDetailModel(nav, it, from, to))
+
+    /** Shows the first vehicle's live location: its trip, with the map following it. */
+    fun openLive(it: Itinerary) {
+        val leg = it.firstTransit ?: return
+        val id = leg.tripId ?: return
+        nav.push(TripModel(nav, id, boardStopId = leg.from.stopId, alightStopId = leg.to.stopId, focusVehicle = true))
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -358,7 +372,8 @@ fun RoutesScreen(model: RoutesModel) {
                         if (itin.id == fastest) add("Fastest")
                         if (itin.id == leastWalk && itin.id != fastest) add("Least walking")
                     }
-                    ItineraryCard(itin, model.live[itin.id], now, tags, model.riskiest(itin)) { model.open(itin) }
+                    ItineraryCard(itin, model.live[itin.id], now, tags, model.riskiest(itin),
+                        onLiveClick = { model.openLive(itin) }) { model.open(itin) }
                 }
                 item {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -463,6 +478,8 @@ fun ItineraryCard(
     now: Instant,
     tags: List<String>,
     risk: Ranking.Transfer? = null,
+    /** Tapping the live arrival line shows the vehicle on a map. */
+    onLiveClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val x = LocalExtra.current
@@ -509,7 +526,7 @@ fun ItineraryCard(
                         color = x.subtle,
                     )
                 }
-                LeaveIn(leaveAt, now, live?.status == LiveStatus.LIVE)
+                LeaveIn(leaveAt, now, live.freshness(now))
             }
             Spacer(Modifier.height(12.dp))
             FlowRow(
@@ -533,7 +550,7 @@ fun ItineraryCard(
             }
             if (first != null) {
                 Spacer(Modifier.height(12.dp))
-                LiveLine(first.lineLabel, first.mode, first.from.name, live, first.start, now)
+                LiveLine(first.lineLabel, first.mode, first.from.name, live, first.start, now, onClick = onLiveClick)
             }
             if (risk != null) {
                 Spacer(Modifier.height(8.dp))
@@ -568,7 +585,7 @@ fun TransferWarning(t: Ranking.Transfer, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun LeaveIn(leaveAt: Instant, now: Instant, live: Boolean) {
+private fun LeaveIn(leaveAt: Instant, now: Instant, freshness: Freshness) {
     val min = (leaveAt.epochSecond - now.epochSecond + 30) / 60
     Column(horizontalAlignment = Alignment.End) {
         if (min <= 0 && min > -2) {
@@ -578,7 +595,7 @@ private fun LeaveIn(leaveAt: Instant, now: Instant, live: Boolean) {
                 Text(
                     "$min",
                     style = MaterialTheme.typography.headlineSmall.merge(Numeric),
-                    color = if (live) LocalExtra.current.live else MaterialTheme.colorScheme.onSurface,
+                    color = freshnessColor(freshness),
                 )
                 Text(" min", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(bottom = 3.dp))
             }
@@ -591,22 +608,39 @@ private fun LeaveIn(leaveAt: Instant, now: Instant, live: Boolean) {
 
 /** "● 116 arrives in 4 min at X · 2 min late" style summary for a boarding. */
 @Composable
-fun LiveLine(label: String, mode: TransitMode, stop: String, live: LiveCall?, scheduled: Instant, now: Instant) {
+fun LiveLine(
+    label: String,
+    mode: TransitMode,
+    stop: String,
+    live: LiveCall?,
+    scheduled: Instant,
+    now: Instant,
+    /** Tapping a live arrival shows the vehicle on a map; ignored without a live vehicle. */
+    onClick: (() -> Unit)? = null,
+) {
     val x = LocalExtra.current
+    val tappable = onClick != null && live?.status == LiveStatus.LIVE && live.vehicle != null
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+            .then(if (tappable) Modifier.clickable(onClickLabel = "Show on map") { onClick!!() } else Modifier)
             .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         when (live?.status) {
             LiveStatus.LIVE -> {
                 val c = delayColor(live.delaySec)
-                LiveDot(c)
+                val f = live.freshness(now)
+                LiveSignal(f, size = 14.dp)
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
+                    val eta = if (live.best.epochSecond - now.epochSecond < 45) "is arriving" else "in " + Fmt.relative(live.best, now)
+                    val fc = freshnessColor(f)
                     Text(
-                        "${modeName(mode)} $label ${if (live.best.epochSecond - now.epochSecond < 45) "is arriving" else "in " + Fmt.relative(live.best, now)}" +
-                            (live.stopsAway?.takeIf { it in 1..30 }?.let { " · $it stop${if (it > 1) "s" else ""} away" } ?: ""),
+                        buildAnnotatedString {
+                            append("${modeName(mode)} $label ")
+                            withStyle(SpanStyle(color = fc, fontWeight = FontWeight.SemiBold)) { append(eta) }
+                            append(live.stopsAway?.takeIf { it in 1..30 }?.let { " · $it stop${if (it > 1) "s" else ""} away" } ?: "")
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,

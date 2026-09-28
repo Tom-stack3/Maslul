@@ -56,7 +56,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.maslul.app.data.Freshness
 import com.maslul.app.data.GeoPoint
+import com.maslul.app.data.freshness
 import com.maslul.app.data.TransitMode
 import com.maslul.app.data.IsraelZone
 import com.maslul.app.data.LineDetail
@@ -67,7 +69,11 @@ import com.maslul.app.data.LineVehicle
 import com.maslul.app.data.Ride
 import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
+import com.maslul.app.ui.components.ArrivalTime
 import com.maslul.app.ui.components.Fmt
+import com.maslul.app.ui.components.LiveLocationCard
+import com.maslul.app.ui.components.LiveSignal
+import com.maslul.app.ui.components.freshnessColor
 import com.maslul.app.ui.components.LineBadge
 import com.maslul.app.ui.components.lineColor
 import com.maslul.app.ui.components.readableAccent
@@ -104,8 +110,16 @@ class LineModel(nav: AppNav, route: LineRoute) : ScreenModel(nav) {
     var error by mutableStateOf<String?>(null)
     var tab by mutableStateOf(0)
     var expanded by mutableStateOf<Int?>(null)
+    /** Map id of the live vehicle the map is following, after tapping its arrival time. */
+    var following by mutableStateOf<String?>(null)
 
     init { load() }
+
+    /** Follows the live vehicle running [journeyRef] on the map, if it's tracked. */
+    fun follow(journeyRef: String?) {
+        val v = vehicles.firstOrNull { journeyRef != null && it.vehicle.journeyRef == journeyRef } ?: return
+        following = v.mapId
+    }
 
     private fun load() {
         scope.launch {
@@ -147,6 +161,7 @@ class LineModel(nav: AppNav, route: LineRoute) : ScreenModel(nav) {
         if (r.gtfsRouteId == route.gtfsRouteId) return
         route = r
         expanded = null
+        following = null
         load()
     }
 
@@ -229,7 +244,7 @@ fun LineScreen(model: LineModel) {
             d == null && model.loading -> LoadingBox(text = "Loading line…")
             d == null -> MessageBox("Line unavailable", body = model.error, action = "Retry", onAction = model::retry)
             else -> {
-                LineMap(d, model.vehicles, color)
+                LineMap(model, d, color, now)
                 PrimaryTabRow(selectedTabIndex = model.tab, containerColor = MaterialTheme.colorScheme.surface) {
                     val off = MaterialTheme.colorScheme.onSurfaceVariant
                     Tab(model.tab == 0, onClick = { model.tab = 0 }, text = { Text("Stops") }, unselectedContentColor = off)
@@ -242,19 +257,41 @@ fun LineScreen(model: LineModel) {
 }
 
 @Composable
-private fun LineMap(d: LineDetail, vehicles: List<LineVehicle>, color: Color) {
+private fun LineMap(model: LineModel, d: LineDetail, color: Color, now: Instant) {
     val stops = remember(d) { d.stops.map { GeoPoint(it.lat, it.lon) } }
-    TransitMap(
-        modifier = Modifier.fillMaxWidth().height(220.dp),
-        lines = listOf(MapLine(d.timeline.line, color, 5f)),
-        markers = stops.mapIndexed { i, p ->
-            MapMarker(p, color, if (i == 0 || i == stops.lastIndex) MarkerKind.STOP else MarkerKind.STOP_SMALL)
-        },
-        vehicles = vehicles.map { MapVehicle(it.vehicle.vehicleRef ?: it.vehicle.journeyRef ?: "", it.vehicle.point, it.vehicle.bearing, color, d.route.label) },
-        fitPoints = stops,
-        fitKey = d.route.gtfsRouteId,
-    )
+    // Keep following only while that vehicle is still reported.
+    val followed = model.vehicles.firstOrNull { it.mapId == model.following }
+    Box(Modifier.fillMaxWidth().height(220.dp)) {
+        TransitMap(
+            modifier = Modifier.fillMaxSize(),
+            lines = listOf(MapLine(d.timeline.line, color, 5f)),
+            markers = stops.mapIndexed { i, p ->
+                MapMarker(p, color, if (i == 0 || i == stops.lastIndex) MarkerKind.STOP else MarkerKind.STOP_SMALL)
+            },
+            vehicles = model.vehicles.map {
+                MapVehicle(it.mapId, it.vehicle.point, it.vehicle.bearing, color, d.route.label,
+                    faded = it.progress.freshness(now) == Freshness.STALE)
+            },
+            fitPoints = stops,
+            fitKey = d.route.gtfsRouteId,
+            contentPadding = PaddingValues(top = if (followed != null) 56.dp else 0.dp),
+            focusVehicleId = followed?.mapId,
+            onUserPan = { model.following = null },
+            onMarkerClick = { id -> if (model.vehicles.any { it.mapId == id }) model.following = id },
+        )
+        if (followed != null) {
+            LiveLocationCard(
+                "${d.route.label} live location" + (followed.ride?.let { " · left ${Fmt.time(it.departure)}" } ?: ""),
+                followed.vehicle.recordedAt,
+                Modifier.padding(8.dp).align(Alignment.TopCenter),
+                onClose = { model.following = null },
+            )
+        }
+    }
 }
+
+/** Stable map id for a line's live vehicle. */
+private val LineVehicle.mapId: String get() = vehicle.vehicleRef ?: vehicle.journeyRef ?: "${vehicle.lineRef}-${vehicle.originDeparture}"
 
 @Composable
 private fun StopsList(model: LineModel, d: LineDetail, color: Color, now: Instant) {
@@ -269,7 +306,9 @@ private fun StopsList(model: LineModel, d: LineDetail, color: Color, now: Instan
             val next = arrivals.firstOrNull()
             Column {
                 // Vehicles approaching this stop (between stop i-1 and i).
-                byGap[i - 1]?.forEach { v -> VehicleRow(v, rail, color, d.route.label, d.route.mode) }
+                byGap[i - 1]?.forEach { v ->
+                    VehicleRow(v, rail, color, d.route.label, d.route.mode, now) { model.following = v.mapId }
+                }
                 TimelineRow(
                     above = if (i == 0) null else rail,
                     below = if (i == d.stops.lastIndex) null else rail,
@@ -285,11 +324,13 @@ private fun StopsList(model: LineModel, d: LineDetail, color: Color, now: Instan
                         }
                         if (next != null) {
                             Column(horizontalAlignment = Alignment.End) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (next.live) { LiveDot(delayColor(next.delaySec)); Spacer(Modifier.width(5.dp)) }
-                                    Text(Fmt.relative(next.time, now), style = MaterialTheme.typography.titleSmall.merge(Numeric),
-                                        color = if (next.live) delayColor(next.delaySec) else MaterialTheme.colorScheme.onSurface)
-                                }
+                                // Tapping a live time follows that vehicle on the map above.
+                                ArrivalTime(
+                                    Fmt.relative(next.time, now),
+                                    next.freshness(now),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    onClick = if (next.live) ({ model.follow(next.journeyRef) }) else null,
+                                )
                                 if (!next.live) Text("scheduled", style = MaterialTheme.typography.labelSmall, color = x.subtle)
                             }
                         }
@@ -298,9 +339,15 @@ private fun StopsList(model: LineModel, d: LineDetail, color: Color, now: Instan
                         Column(Modifier.padding(bottom = 12.dp)) {
                             FlowRow2 {
                                 arrivals.forEach { a ->
+                                    val f = a.freshness(now)
                                     Pill(
                                         (if (a.live) "● " else "") + Fmt.time(a.time),
-                                        if (a.live) delayColor(a.delaySec) else x.subtle,
+                                        if (a.live) freshnessColor(f) else x.subtle,
+                                        modifier = if (a.live) {
+                                            Modifier.clip(RoundedCornerShape(50)).clickable(onClickLabel = "Show on map") { model.follow(a.journeyRef) }
+                                        } else {
+                                            Modifier
+                                        },
                                     )
                                 }
                                 if (arrivals.isEmpty()) Text("No more trips today", style = MaterialTheme.typography.bodySmall, color = x.subtle)
@@ -324,10 +371,11 @@ private fun FlowRow2(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun VehicleRow(v: LineVehicle, rail: RailSpec, color: Color, label: String, mode: TransitMode) {
+private fun VehicleRow(v: LineVehicle, rail: RailSpec, color: Color, label: String, mode: TransitMode, now: Instant, onClick: () -> Unit) {
     val x = LocalExtra.current
     val c = delayColor(v.progress.delaySec)
-    TimelineRow(rail, rail, Node.VEHICLE, color, timeWidth = 12.dp, nodeY = 18.dp) {
+    TimelineRow(rail, rail, Node.VEHICLE, color, timeWidth = 12.dp, nodeY = 18.dp,
+        modifier = Modifier.clickable(onClickLabel = "Show on map", onClick = onClick)) {
         Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(
                 Modifier.clip(RoundedCornerShape(10.dp)).background(color.copy(alpha = 0.12f)).padding(horizontal = 8.dp, vertical = 4.dp),
@@ -340,9 +388,12 @@ private fun VehicleRow(v: LineVehicle, rail: RailSpec, color: Color, label: Stri
             }
             Spacer(Modifier.width(8.dp))
             Pill(delayText(v.progress.delaySec), c)
-            if (v.progress.stale) {
-                Spacer(Modifier.width(6.dp))
-                Text("last seen ${Fmt.time(v.vehicle.recordedAt)}", style = MaterialTheme.typography.labelSmall, color = x.subtle)
+            val f = v.progress.freshness(now)
+            Spacer(Modifier.width(6.dp))
+            LiveSignal(f, size = 12.dp)
+            if (f == Freshness.STALE) {
+                Spacer(Modifier.width(4.dp))
+                Text("last seen ${Fmt.time(v.vehicle.recordedAt)}", style = MaterialTheme.typography.labelSmall, color = x.stale)
             }
         }
     }

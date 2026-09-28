@@ -5,6 +5,9 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.view.Gravity
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
@@ -29,6 +32,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.maslul.app.data.GeoPoint
 import com.maslul.app.ui.theme.LocalExtra
+import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
@@ -58,7 +62,15 @@ data class MapMarker(
     val id: String? = null,
 )
 
-data class MapVehicle(val id: String, val point: GeoPoint, val bearing: Float?, val color: Color, val label: String)
+data class MapVehicle(
+    val id: String,
+    val point: GeoPoint,
+    val bearing: Float?,
+    val color: Color,
+    val label: String,
+    /** Drawn translucent, e.g. when its position stopped updating. */
+    val faded: Boolean = false,
+)
 
 /** Lets a screen move the camera imperatively (e.g. "my location" button). */
 class MapController {
@@ -89,6 +101,10 @@ fun TransitMap(
     onMarkerClick: ((String) -> Unit)? = null,
     onLongPress: ((GeoPoint) -> Unit)? = null,
     onCameraIdle: ((GeoPoint) -> Unit)? = null,
+    /** The camera follows this vehicle (by [MapVehicle.id]) as its position refreshes. */
+    focusVehicleId: String? = null,
+    /** Called when the user drags the map, so the screen can stop following. */
+    onUserPan: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val dark = LocalExtra.current.isDark
@@ -99,6 +115,10 @@ fun TransitMap(
     val markerClick by rememberUpdatedState(onMarkerClick)
     val longPress by rememberUpdatedState(onLongPress)
     val cameraIdle by rememberUpdatedState(onCameraIdle)
+    val userPan by rememberUpdatedState(onUserPan)
+    val followingNow by rememberUpdatedState(focusVehicleId?.takeIf { id -> vehicles.any { it.id == id } })
+    /** Where each vehicle is currently drawn, so refreshed positions glide instead of jumping. */
+    val drawn = remember { HashMap<String, GeoPoint>() }
 
     val mapView = remember {
         MapView(context).apply { onCreate(null) }
@@ -148,6 +168,9 @@ fun TransitMap(
             m.addOnMapLongClickListener { latLng ->
                 longPress?.let { it(GeoPoint(latLng.latitude, latLng.longitude)); true } ?: false
             }
+            m.addOnCameraMoveStartedListener { reason ->
+                if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) userPan?.invoke()
+            }
             m.addOnCameraIdleListener {
                 m.cameraPosition.target?.let { t -> cameraIdle?.invoke(GeoPoint(t.latitude, t.longitude)) }
             }
@@ -166,20 +189,67 @@ fun TransitMap(
     }
 
     // Push data into the map whenever it (or the style) changes.
-    LaunchedEffect(style, lines, markers, vehicles, user) {
+    LaunchedEffect(style, lines, markers, user) {
         val s = style ?: return@LaunchedEffect
         (s.getSource("m-lines") as? GeoJsonSource)?.setGeoJson(linesFc(lines))
         (s.getSource("m-markers") as? GeoJsonSource)?.setGeoJson(markersFc(markers))
-        ensureVehicleIcons(s, vehicles)
-        (s.getSource("m-vehicles") as? GeoJsonSource)?.setGeoJson(vehiclesFc(vehicles))
         (s.getSource("m-user") as? GeoJsonSource)?.setGeoJson(
             FeatureCollection.fromFeatures(listOfNotNull(user?.let { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) })),
         )
     }
 
+    // Vehicles glide from where they're drawn to their refreshed position.
+    LaunchedEffect(style, vehicles, focusVehicleId) {
+        val s = style ?: return@LaunchedEffect
+        val src = s.getSource("m-vehicles") as? GeoJsonSource ?: return@LaunchedEffect
+        ensureVehicleIcons(s, vehicles)
+        drawn.keys.retainAll(vehicles.map { it.id }.toSet())
+        val from = vehicles.associate { it.id to (drawn[it.id] ?: it.point) }
+        if (vehicles.any { from.getValue(it.id) != it.point }) {
+            animate(0f, 1f, animationSpec = tween(1400, easing = FastOutSlowInEasing)) { f, _ ->
+                val frame = vehicles.map { v -> v.copy(point = lerpPoint(from.getValue(v.id), v.point, f)) }
+                frame.forEach { drawn[it.id] = it.point }
+                src.setGeoJson(vehiclesFc(frame, focusVehicleId))
+            }
+        }
+        vehicles.forEach { drawn[it.id] = it.point }
+        src.setGeoJson(vehiclesFc(vehicles, focusVehicleId))
+    }
+
+    // Follow the focused vehicle: zoom in on it once, then pan along as its position refreshes.
+    val focused = vehicles.firstOrNull { it.id == focusVehicleId }
+    var followed by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(map, style != null, focusVehicleId, focused?.point) {
+        val m = map ?: return@LaunchedEffect
+        if (style == null) return@LaunchedEffect
+        val p = focused?.point
+        if (focusVehicleId == null || p == null) {
+            followed = null
+            return@LaunchedEffect
+        }
+        val first = followed != focusVehicleId
+        followed = focusVehicleId
+        val pad = with(density) {
+            doubleArrayOf(
+                contentPadding.calculateStartPadding(layoutDir).toPx().toDouble(),
+                contentPadding.calculateTopPadding().toPx().toDouble(),
+                contentPadding.calculateEndPadding(layoutDir).toPx().toDouble(),
+                contentPadding.calculateBottomPadding().toPx().toDouble(),
+            )
+        }
+        val camera = CameraPosition.Builder()
+            .target(LatLng(p.lat, p.lon))
+            .zoom(if (first) maxOf(m.cameraPosition.zoom, 15.5) else m.cameraPosition.zoom)
+            .padding(pad)
+            .build()
+        m.animateCamera(CameraUpdateFactory.newCameraPosition(camera), if (first) 700 else 1400)
+    }
+
     LaunchedEffect(map, style != null, fitKey) {
         val m = map ?: return@LaunchedEffect
         if (style == null || fitKey == null || fitPoints.isEmpty()) return@LaunchedEffect
+        // While following a vehicle, don't yank the camera back to the whole route.
+        if (followingNow != null) return@LaunchedEffect
         val px = with(density) {
             intArrayOf(
                 (contentPadding.calculateStartPadding(layoutDir) + 36.dp).roundToPx(),
@@ -191,9 +261,14 @@ fun TransitMap(
         val distinct = fitPoints.distinct()
         if (distinct.size == 1) {
             val p = distinct.first()
-            m.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(p.lat, p.lon), 15.5))
-            // Shift so the point sits in the visible area above a bottom sheet.
-            m.scrollBy(0f, (px[3] - px[1]) / 2f)
+            // Camera padding keeps the point centred in the visible area above a bottom sheet.
+            val edge = 36 * density.density
+            val pad = DoubleArray(4) { (px[it] - edge).toDouble() }
+            m.moveCamera(
+                CameraUpdateFactory.newCameraPosition(
+                    CameraPosition.Builder().target(LatLng(p.lat, p.lon)).zoom(15.5).padding(pad).build(),
+                ),
+            )
         } else {
             val b = LatLngBounds.Builder().apply { distinct.forEach { include(LatLng(it.lat, it.lon)) } }.build()
             runCatching {
@@ -266,9 +341,23 @@ private fun setupLayers(s: Style, dark: Boolean) {
             PropertyFactory.circleStrokeWidth(2.5f),
         ),
     )
+    // Soft halo marking the vehicle the camera is following.
+    s.addLayer(
+        CircleLayer("m-vehicles-focus", "m-vehicles")
+            .withFilter(Expression.eq(Expression.get("focus"), true))
+            .withProperties(
+                PropertyFactory.circleRadius(26f),
+                PropertyFactory.circleColor(Expression.toColor(Expression.get("color"))),
+                PropertyFactory.circleOpacity(0.22f),
+                PropertyFactory.circleStrokeColor(Expression.toColor(Expression.get("color"))),
+                PropertyFactory.circleStrokeWidth(1.5f),
+                PropertyFactory.circleStrokeOpacity(0.5f),
+            ),
+    )
     s.addLayer(
         SymbolLayer("m-vehicles", "m-vehicles").withProperties(
             PropertyFactory.iconImage(Expression.get("icon")),
+            PropertyFactory.iconOpacity(Expression.get("opacity")),
             PropertyFactory.iconRotate(Expression.get("bearing")),
             PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
             PropertyFactory.iconAllowOverlap(true),
@@ -314,10 +403,16 @@ private fun Feature.fill(v: String) = addStringProperty("fill", v)
 private fun Feature.stroke(v: String) = addStringProperty("stroke", v)
 private fun Feature.sw(v: Float) = addNumberProperty("sw", v)
 
-private fun vehiclesFc(vs: List<MapVehicle>) = FeatureCollection.fromFeatures(
+private fun lerpPoint(a: GeoPoint, b: GeoPoint, f: Float) =
+    GeoPoint(a.lat + (b.lat - a.lat) * f, a.lon + (b.lon - a.lon) * f)
+
+private fun vehiclesFc(vs: List<MapVehicle>, focusId: String?) = FeatureCollection.fromFeatures(
     vs.map { v ->
         Feature.fromGeometry(Point.fromLngLat(v.point.lon, v.point.lat)).apply {
             addStringProperty("id", v.id)
+            addStringProperty("color", hex(v.color))
+            addBooleanProperty("focus", v.id == focusId)
+            addNumberProperty("opacity", if (v.faded) 0.55f else 1f)
             addStringProperty("label", v.label.take(4))
             addStringProperty("tcolor", hex(contentColorOn(v.color)))
             addStringProperty("icon", iconName(v.color, v.bearing != null))

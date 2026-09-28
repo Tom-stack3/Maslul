@@ -22,6 +22,17 @@ object Fmt {
         }
     }
 
+    /** "Updated 30s ago", "Updated 2 min ago" — how old a live position is. */
+    fun ago(t: Instant, now: Instant): String {
+        val sec = (now.epochSecond - t.epochSecond).coerceAtLeast(0)
+        return when {
+            sec < 5 -> "Updated just now"
+            sec < 60 -> "Updated ${sec}s ago"
+            sec < 60 * 60 -> "Updated ${sec / 60} min ago"
+            else -> "Updated at ${time(t)}"
+        }
+    }
+
     fun duration(sec: Long): String {
         val m = ((sec + 30) / 60).coerceAtLeast(1)
         return if (m < 60) "$m min" else "${m / 60} h ${(m % 60).toString().padStart(2, '0')} min".replace(" 00 min", "")

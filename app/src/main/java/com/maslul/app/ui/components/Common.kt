@@ -61,6 +61,7 @@ import com.maslul.app.data.LiveCall
 import com.maslul.app.data.Operators
 import com.maslul.app.data.LiveStatus
 import com.maslul.app.data.TransitMode
+import com.maslul.app.data.freshness
 import com.maslul.app.ui.theme.LocalExtra
 import com.maslul.app.ui.theme.ModeColors
 import com.maslul.app.ui.theme.Numeric
@@ -204,15 +205,8 @@ fun delayText(delaySec: Long): String {
 fun MinutesText(call: LiveCall?, fallback: java.time.Instant, now: java.time.Instant, modifier: Modifier = Modifier) {
     val t = call?.best ?: fallback
     val live = call?.status == LiveStatus.LIVE
-    val color = if (live) delayColor(call!!.delaySec) else MaterialTheme.colorScheme.onSurface
     Column(modifier, horizontalAlignment = Alignment.End) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (live) {
-                LiveDot(color)
-                Spacer(Modifier.width(5.dp))
-            }
-            Text(Fmt.relative(t, now), style = MaterialTheme.typography.titleMedium.merge(Numeric), color = color)
-        }
+        ArrivalTime(Fmt.relative(t, now), call.freshness(now))
         if (live && Math.abs(call!!.delaySec) >= 60) {
             Text(
                 "${Fmt.time(call.scheduled)} sched.",

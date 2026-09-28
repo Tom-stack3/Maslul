@@ -81,9 +81,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.maslul.app.data.Combine
 import com.maslul.app.data.GeoPoint
 import com.maslul.app.data.IsraelZone
 import com.maslul.app.data.Itinerary
+import com.maslul.app.data.Leg
 import com.maslul.app.data.LiveCall
 import com.maslul.app.data.LiveStatus
 import com.maslul.app.data.Place
@@ -91,6 +93,7 @@ import com.maslul.app.data.PlaceKind
 import com.maslul.app.data.Ranking
 import com.maslul.app.data.SavedTrip
 import com.maslul.app.data.TransitMode
+import com.maslul.app.data.TransitRepository
 import com.maslul.app.data.TransitousApi
 import com.maslul.app.data.UserData
 import com.maslul.app.data.WalkSpeed
@@ -138,13 +141,46 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
     private var fromPoint: GeoPoint? = null
     private var toPoint: GeoPoint? = null
     val live = mutableStateMapOf<String, LiveCall>()
+    /** Live state of every line option on each option's first ride, by [Leg.rideKey]. */
+    val rideLive = mutableStateMapOf<String, LiveCall>()
+    /** Itineraries as returned (before combining), and extra rides found per stop pair. */
+    private var raw: List<Itinerary> = emptyList()
+    private val rides = HashMap<String, List<Leg>>()
     /** When the current results were loaded, to refresh stale "leave now" searches. */
     private var searchedAt: Instant = Instant.EPOCH
 
     init { search() }
 
     private val walkMps get() = store.data.value.settings.walkSpeed.mps
-    private fun ranked(list: List<Itinerary>) = Ranking.rank(list, timeMode == TimeMode.ARRIVE, walkMps)
+    /** Folds options that differ only by line into one, then ranks and adds more lines found per ride. */
+    private fun ranked(list: List<Itinerary>): List<Itinerary> {
+        val arriveBy = timeMode == TimeMode.ARRIVE
+        val best = list.sortedBy { Ranking.score(it, arriveBy, walkMps) }
+        val now = if (timeMode == TimeMode.NOW) Instant.now() else null
+        return Ranking.rank(Combine.merge(best), arriveBy, walkMps).map { itin ->
+            itin.legs.indices.fold(itin) { acc, i ->
+                val found = rides[TransitRepository.rideBucket(acc.legs[i])]
+                if (found == null || !acc.legs[i].mode.isTransit) acc else Combine.addAlternatives(acc, i, found, now)
+            }
+        }
+    }
+
+    /** Looks up other lines riding the same hops as the top options, then re-combines. */
+    private suspend fun findAlternatives() {
+        val modes = store.data.value.settings.modes
+        val legs = itineraries.take(8).flatMap { it.transitLegs }
+            .filter { it.from.stopId != null && it.to.stopId != null }
+            .distinctBy { TransitRepository.rideBucket(it) }
+            .filter { TransitRepository.rideBucket(it) !in rides }
+        if (legs.isEmpty()) return
+        val found = coroutineScope {
+            legs.map { l -> async { runCatching { TransitRepository.rideBucket(l) to repo.rideAlternatives(l, modes) }.getOrNull() } }
+                .awaitAll().filterNotNull()
+        }
+        if (found.isEmpty()) return
+        found.forEach { (k, v) -> rides[k] = v }
+        itineraries = ranked(raw)
+    }
     fun riskiest(itin: Itinerary) = Ranking.riskiest(itin, walkMps)
 
     private suspend fun resolve(p: Place): GeoPoint? =
@@ -173,7 +209,10 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             error = null
             itineraries = emptyList()
             walkOnly = null
+            raw = emptyList()
+            rides.clear()
             live.clear()
+            rideLive.clear()
             searchedAt = Instant.now()
             fromPoint = resolve(from)
             toPoint = resolve(to)
@@ -184,7 +223,8 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             }
             runCatching { repo.plan(request()!!) }
                 .onSuccess { r ->
-                    itineraries = ranked(r.itineraries)
+                    raw = r.itineraries
+                    itineraries = ranked(raw)
                     walkOnly = r.walkOnly?.takeIf { it.durationSec < 45 * 60 }
                     nextCursor = r.nextCursor
                     prevCursor = r.previousCursor
@@ -192,6 +232,8 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
                 }
                 .onFailure { error = "Couldn't load routes. Check your connection." }
             loading = false
+            refreshLive()
+            findAlternatives()
             refreshLive()
         }
     }
@@ -201,12 +243,15 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
         scope.launch {
             loadingMore = true
             runCatching { repo.plan(request(cursor)!!) }.onSuccess { r ->
-                val known = itineraries.map { it.id }.toSet()
+                val known = raw.map { it.id }.toSet()
                 val fresh = r.itineraries.filter { it.id !in known }
-                itineraries = ranked(if (later) itineraries + fresh else fresh + itineraries)
+                raw = if (later) raw + fresh else fresh + raw
+                itineraries = ranked(raw)
                 if (later) nextCursor = r.nextCursor else prevCursor = r.previousCursor
             }
             loadingMore = false
+            refreshLive()
+            findAlternatives()
             refreshLive()
         }
     }
@@ -218,6 +263,13 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
                 .filter { it.firstTransit != null && it.firstTransit!!.start.isBefore(now.plusSeconds(90 * 60)) }
                 .map { it to async { runCatching { repo.legLive(it.firstTransit!!, now) }.getOrNull() } }
                 .forEach { (it, d) -> d.await()?.let { c -> live[it.id] = c } }
+            // Every line of a combined ride, so the card can show which comes first.
+            itineraries.flatMap { it.transitLegs.filter { l -> l.combined } }
+                .flatMap { it.alternatives + it.copy(alternatives = emptyList()) }
+                .filter { it.start.isBefore(now.plusSeconds(90 * 60)) && it.end.isAfter(now) }
+                .distinctBy { it.rideKey }
+                .map { it to async { runCatching { repo.legLive(it, now) }.getOrNull() } }
+                .forEach { (l, d) -> d.await()?.let { c -> rideLive[l.rideKey] = c } }
         }
     }
 
@@ -358,7 +410,7 @@ fun RoutesScreen(model: RoutesModel) {
                         if (itin.id == fastest) add("Fastest")
                         if (itin.id == leastWalk && itin.id != fastest) add("Least walking")
                     }
-                    ItineraryCard(itin, model.live[itin.id], now, tags, model.riskiest(itin)) { model.open(itin) }
+                    ItineraryCard(itin, model.live[itin.id], now, tags, model.riskiest(itin), model.rideLive) { model.open(itin) }
                 }
                 item {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -463,6 +515,7 @@ fun ItineraryCard(
     now: Instant,
     tags: List<String>,
     risk: Ranking.Transfer? = null,
+    rideLive: Map<String, LiveCall> = emptyMap(),
     onClick: () -> Unit,
 ) {
     val x = LocalExtra.current
@@ -523,6 +576,8 @@ fun ItineraryCard(
                             Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, null, tint = x.subtle, modifier = Modifier.size(18.dp))
                             Text("${(leg.durationSec + 30) / 60}", style = MaterialTheme.typography.labelMedium, color = x.subtle)
                         }
+                    } else if (leg.combined) {
+                        CombinedBadges(leg)
                     } else {
                         LineBadge(leg.lineLabel, leg.mode, color = lineColor(leg.mode, leg.routeColor))
                     }
@@ -531,9 +586,13 @@ fun ItineraryCard(
                     }
                 }
             }
-            if (first != null) {
+            if (first != null && !first.combined) {
                 Spacer(Modifier.height(12.dp))
                 LiveLine(first.lineLabel, first.mode, first.from.name, live, first.start, now)
+            }
+            itin.transitLegs.filter { it.combined }.forEach { leg ->
+                Spacer(Modifier.height(if (leg === first) 12.dp else 8.dp))
+                RideOptions(leg, now, relative = leg === first) { o -> if (o.rideKey == first?.rideKey) live else rideLive[o.rideKey] }
             }
             if (risk != null) {
                 Spacer(Modifier.height(8.dp))
@@ -545,6 +604,56 @@ fun ItineraryCard(
                     Icon(Icons.Rounded.WarningAmber, null, tint = Color(0xFFF5A524), modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Service alert on this route", style = MaterialTheme.typography.bodySmall, color = x.subtle)
+                }
+            }
+        }
+    }
+}
+
+/** "16 / 92 / 5": every line that makes a combined ride, soonest first. */
+@Composable
+fun CombinedBadges(leg: Leg) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        leg.options.distinctBy { it.lineLabel }.forEachIndexed { i, o ->
+            if (i > 0) Text(" / ", style = MaterialTheme.typography.labelMedium, color = LocalExtra.current.subtle)
+            LineBadge(o.lineLabel, o.mode, color = lineColor(o.mode, o.routeColor), showIcon = i == 0)
+        }
+    }
+}
+
+/**
+ * Compact next departures of every line in a combined ride:
+ * "From Stop · [16] 4 min  [92] 7 min  [5] 12 min", live ones marked.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun RideOptions(leg: Leg, now: Instant, relative: Boolean, liveOf: (Leg) -> LiveCall?) {
+    val x = LocalExtra.current
+    val options = leg.options.map { it to liveOf(it) }
+        .filter { (_, c) -> c?.status != LiveStatus.PASSED }
+        .sortedBy { (o, c) -> c?.takeIf { it.status == LiveStatus.LIVE }?.best ?: o.start }
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+    ) {
+        Text(
+            "${options.size} lines from ${leg.from.name}",
+            style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(6.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            options.forEach { (o, c) ->
+                val isLive = c?.status == LiveStatus.LIVE
+                val t = if (isLive) c!!.best else o.start
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LineBadge(o.lineLabel, o.mode, color = lineColor(o.mode, o.routeColor), showIcon = false)
+                    Spacer(Modifier.width(5.dp))
+                    if (isLive) { LiveDot(delayColor(c!!.delaySec)); Spacer(Modifier.width(4.dp)) }
+                    Text(
+                        if (relative) Fmt.relative(t, now) else Fmt.time(t),
+                        style = MaterialTheme.typography.labelLarge.merge(Numeric),
+                        color = if (isLive) delayColor(c!!.delaySec) else MaterialTheme.colorScheme.onSurface,
+                    )
                 }
             }
         }

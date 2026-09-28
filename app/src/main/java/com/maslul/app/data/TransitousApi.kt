@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.time.Instant
 import java.time.OffsetDateTime
+import java.time.temporal.ChronoUnit
 
 /**
  * Client for Transitous (https://transitous.org), a free community-run MOTIS instance that
@@ -42,7 +43,7 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
             .addQueryParameter("maxPreTransitTime", (req.maxWalkMinutes * 60).toString())
             .addQueryParameter("maxPostTransitTime", (req.maxWalkMinutes * 60).toString())
             .apply {
-                req.time?.let { addQueryParameter("time", it.toString()) }
+                req.time?.let { addQueryParameter("time", queryTime(it)) }
                 motisModes(req.modes)?.let { addQueryParameter("transitModes", it) }
                 if (req.wheelchair) addQueryParameter("pedestrianProfile", "WHEELCHAIR")
                 req.maxTransfers?.let { addQueryParameter("maxTransfers", it.toString()) }
@@ -121,7 +122,7 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
             .addQueryParameter("stopId", stopId)
             .addQueryParameter("n", count.toString())
             .apply {
-                time?.let { addQueryParameter("time", it.toString()) }
+                time?.let { addQueryParameter("time", queryTime(it)) }
                 language?.let { addQueryParameter("language", it) }
             }
             .build()
@@ -129,6 +130,12 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
     }
 
     companion object {
+        /**
+         * MOTIS silently ignores a `time` with fractional seconds and answers from the start of
+         * the service day instead, so always send whole seconds.
+         */
+        fun queryTime(t: Instant): String = t.truncatedTo(ChronoUnit.SECONDS).toString()
+
         fun motisModes(modes: Set<TransitMode>): String? {
             val all = TransitMode.entries.filter { it.isTransit }.toSet()
             if (modes.containsAll(all - TransitMode.OTHER)) return null

@@ -102,7 +102,8 @@ class LiveApiSmokeTest {
         val stops = repo.nearbyStops(GeoPoint(32.0741, 34.7922))
         assertTrue(stops.isNotEmpty())
         val board = repo.stopBoard(stops.first().stopId!!)
-        println("${stops.first().name}: ${board.size} departures, live=${board.count { it.live?.status == LiveStatus.LIVE }}")
+        val late = board.count { it.live?.status == LiveStatus.LIVE && it.departure.scheduled.isBefore(java.time.Instant.now()) }
+        println("${stops.first().name}: ${board.size} departures, live=${board.count { it.live?.status == LiveStatus.LIVE }}, late earlier trips=$late")
         board.take(5).forEach { println("  ${it.departure.lineLabel} → ${it.departure.headsign} ${it.live?.status} ${it.live?.best}") }
     }
 }

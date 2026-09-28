@@ -1,10 +1,19 @@
 package com.maslul.app
 
+import com.maslul.app.data.BoardEntry
+import com.maslul.app.data.Departure
 import com.maslul.app.data.GeoPoint
+import com.maslul.app.data.LiveCall
 import com.maslul.app.data.LiveCalls
+import com.maslul.app.data.LiveRepository
 import com.maslul.app.data.LiveStatus
+import com.maslul.app.data.StopCall
+import com.maslul.app.data.TransitMode
+import com.maslul.app.data.TransitRepository
+import com.maslul.app.data.TransitousApi
 import com.maslul.app.data.TripTimeline
 import com.maslul.app.data.Vehicle
+import com.maslul.app.data.forTrip
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -99,5 +108,88 @@ class EtaTest {
         assertEquals(LiveStatus.SCHEDULED, LiveCalls.compute(timeline, origin.plusSeconds(600), 1, null, null, t).status)
         assertEquals(LiveStatus.UNTRACKED, LiveCalls.compute(timeline, origin, 1, null, null, t).status)
         assertTrue(live.best.isAfter(t))
+    }
+
+    // ---- Late earlier trips at a stop ------------------------------------------------
+
+    private fun departure(trip: String, scheduled: Instant) = Departure(
+        tripId = trip, routeId = "il-Israel-MOT_1", mode = TransitMode.BUS, lineLabel = "16", headsign = "X",
+        agency = null, routeColor = null, scheduled = scheduled,
+        stop = StopCall("s3", "Stop", null, stops[3].lat, stops[3].lon, scheduled, scheduled),
+    )
+
+    @Test
+    fun lateEarlierTripIsShownAheadOfTheNextScheduledOne() {
+        // Trip A left at 18:00 and is due at stop 3 at 18:06, but it's 5 min late: at 18:08 it
+        // is 1.5 km along. Trip B left at 18:10 and is still at the terminal, due at 18:16.
+        val now = origin.plusSeconds(480)
+        val originB = origin.plusSeconds(600)
+        val a = vehicle(1.5, now).copy(journeyRef = "100")
+        val b = vehicle(0.0, now, 0.0).copy(journeyRef = "200", originDeparture = originB)
+        val vehicles = listOf(b, a)
+
+        val depA = departure("A", origin.plusSeconds(360))
+        val depB = departure("B", originB.plusSeconds(360))
+        // The stop-times query starting "now" only returns B; the look-back query returns A.
+        val deps = TransitRepository.mergeDepartures(listOf(depB), listOf(depA, depB), now)
+        assertEquals(listOf("A", "B"), deps.map { it.tripId })
+
+        val liveA = LiveCalls.compute(timeline, origin, 3, null, vehicles.forTrip("100", origin), now)
+        val liveB = LiveCalls.compute(timeline, originB, 3, null, vehicles.forTrip("200", originB), now)
+        assertEquals(LiveStatus.LIVE, liveA.status)
+        assertEquals(a, liveA.vehicle)
+        assertEquals(b, liveB.vehicle)
+        // A is ~1.5 km from the stop: arriving within a couple of minutes, not at B's 18:16.
+        assertTrue(liveA.best.isBefore(now.plusSeconds(4 * 60)))
+        assertTrue(liveA.best.isBefore(liveB.best))
+
+        val board = TransitRepository.arrangeBoard(listOf(BoardEntry(depB, liveB), BoardEntry(depA, liveA)), now)
+        assertEquals(listOf("A", "B"), board.map { it.departure.tripId })
+    }
+
+    @Test
+    fun etaFollowsNewerPositions() {
+        val now = origin.plusSeconds(480)
+        val first = LiveCalls.compute(timeline, origin, 3, null, vehicle(1.5, now), now)
+        val later = now.plusSeconds(60)
+        val second = LiveCalls.compute(timeline, origin, 3, null, vehicle(2.5, later), later)
+        assertTrue(second.best.isBefore(first.best))
+        assertEquals(1, second.stopsAway)
+    }
+
+    @Test
+    fun overdueUntrackedAndPassedTripsLeaveTheBoard() {
+        val now = origin.plusSeconds(600)
+        val gone = departure("gone", origin.plusSeconds(360))
+        val passed = departure("passed", origin.plusSeconds(500))
+        val next = departure("next", origin.plusSeconds(900))
+        val board = TransitRepository.arrangeBoard(
+            listOf(
+                BoardEntry(next, LiveCall(LiveStatus.SCHEDULED, next.scheduled, null)),
+                BoardEntry(gone, LiveCall(LiveStatus.UNTRACKED, gone.scheduled, null)),
+                BoardEntry(passed, LiveCall(LiveStatus.PASSED, passed.scheduled, null)),
+            ),
+            now,
+        )
+        assertEquals(listOf("next"), board.map { it.departure.tripId })
+        // Nothing older than the look-back window is kept.
+        assertTrue(TransitRepository.mergeDepartures(emptyList(), listOf(departure("old", now.minusSeconds(3600))), now).isEmpty())
+    }
+
+    @Test
+    fun forTripPrefersTheNewestReport() {
+        val t = origin.plusSeconds(300)
+        val old = vehicle(1.0, t.minusSeconds(120)).copy(vehicleRef = "x")
+        val fresh = vehicle(1.5, t).copy(vehicleRef = "y")
+        assertEquals(fresh, listOf(old, fresh).forTrip("42", origin))
+        assertEquals(fresh, listOf(old, fresh).forTrip(null, origin))
+        val dup = vehicle(1.5, t).copy(vehicleRef = "x")
+        assertEquals(listOf(dup), LiveRepository.latestPerVehicle(listOf(old, dup)))
+    }
+
+    @Test
+    fun queryTimeHasWholeSeconds() {
+        // MOTIS ignores fractional-second times and answers from the start of the day.
+        assertEquals("2026-09-28T16:00:00Z", TransitousApi.queryTime(Instant.parse("2026-09-28T16:00:00.123456Z")))
     }
 }

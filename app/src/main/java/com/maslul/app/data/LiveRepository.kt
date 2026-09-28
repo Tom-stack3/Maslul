@@ -60,7 +60,7 @@ class LiveRepository(
             resp.use {
                 if (it.isSuccessful) {
                     val vehicles = it.body!!.byteStream().use { s -> parse(s, minute) }
-                    return Snapshot(minute, clock(), vehicles.groupBy(Vehicle::lineRef))
+                    return Snapshot(minute, clock(), vehicles.groupBy(Vehicle::lineRef).mapValues { (_, vs) -> latestPerVehicle(vs) })
                 }
             }
         }
@@ -71,6 +71,20 @@ class LiveRepository(
         private val pathFmt = DateTimeFormatter.ofPattern("yyyy/MM/dd/HH/mm")
         /** Vehicles that stopped reporting linger in the feed; drop them. */
         const val MAX_AGE_SEC = 5 * 60L
+
+        /** The feed sometimes repeats a vehicle; keep only its newest report per trip. */
+        fun latestPerVehicle(vs: List<Vehicle>): List<Vehicle> {
+            if (vs.size < 2) return vs
+            val out = LinkedHashMap<String, Vehicle>()
+            val anonymous = ArrayList<Vehicle>()
+            for (v in vs) {
+                if (v.vehicleRef == null) { anonymous += v; continue }
+                val key = v.vehicleRef + "|" + v.journeyRef
+                val prev = out[key]
+                if (prev == null || v.recordedAt.isAfter(prev.recordedAt)) out[key] = v
+            }
+            return out.values.toList() + anonymous
+        }
 
         fun parse(brotli: InputStream, snapshotTime: Instant): List<Vehicle> =
             parseJson(BrotliInputStream(brotli), snapshotTime)
@@ -209,7 +223,7 @@ class LiveRepository(
     }
 }
 
-/** Finds the vehicle serving a specific trip. */
+/** Finds the vehicle serving a specific trip; the freshest report wins if several claim it. */
 fun List<Vehicle>.forTrip(tripNumber: String?, originDeparture: Instant?): Vehicle? =
-    firstOrNull { tripNumber != null && it.journeyRef == tripNumber }
-        ?: originDeparture?.let { o -> firstOrNull { Math.abs(it.originDeparture.epochSecond - o.epochSecond) < 60 } }
+    filter { tripNumber != null && it.journeyRef == tripNumber }.maxByOrNull { it.recordedAt }
+        ?: originDeparture?.let { o -> filter { Math.abs(it.originDeparture.epochSecond - o.epochSecond) < 60 }.maxByOrNull { it.recordedAt } }

@@ -107,10 +107,20 @@ class TransitRepository(
 
     // ---- Stops ----------------------------------------------------------------------
 
-    suspend fun stopBoard(stopId: String, now: Instant = Instant.now()): List<BoardEntry> {
-        val deps = transitous.stopTimes(stopId, count = 40, language = language)
-            .filter { it.scheduled.isAfter(now.minusSeconds(20 * 60)) }
+    suspend fun stopBoard(stopId: String, now: Instant = Instant.now()): List<BoardEntry> = coroutineScope {
+        // Stop times start at the requested time, so a late bus whose timetable slot here has
+        // already passed would be missing entirely; fetch the recent past too.
+        val upcoming = async { transitous.stopTimes(stopId, count = 40, language = language) }
+        val recent = async {
+            runCatching { transitous.stopTimes(stopId, now.minusSeconds(LATE_WINDOW_SEC), count = 40, language = language) }
+                .getOrDefault(emptyList())
+        }
+        val deps = mergeDepartures(upcoming.await(), recent.await(), now)
         val snapshot = live.snapshot()
+        boardEntries(deps, snapshot, now)
+    }
+
+    private suspend fun boardEntries(deps: List<Departure>, snapshot: LiveRepository.Snapshot?, now: Instant): List<BoardEntry> {
         return coroutineScope {
             deps.map { d ->
                 async {
@@ -135,10 +145,7 @@ class TransitRepository(
                     }
                     BoardEntry(d, liveCall)
                 }
-            }.awaitAll()
-                .filter { it.live?.status != LiveStatus.PASSED }
-                .filter { (it.live?.best ?: it.departure.scheduled).isAfter(now.minusSeconds(60)) }
-                .sortedBy { it.live?.best ?: it.departure.scheduled }
+            }.awaitAll().let { arrangeBoard(it, now) }
         }
     }
 
@@ -238,6 +245,28 @@ class TransitRepository(
     }
 
     companion object {
+        /** How far back to look for late trips whose scheduled time at a stop already passed. */
+        const val LATE_WINDOW_SEC = 30 * 60L
+
+        /** Upcoming stop times plus recently-scheduled ones (possibly running late), without duplicates. */
+        fun mergeDepartures(upcoming: List<Departure>, recent: List<Departure>, now: Instant): List<Departure> {
+            val seen = HashSet<String>()
+            return (recent + upcoming)
+                .filter { it.scheduled.isAfter(now.minusSeconds(LATE_WINDOW_SEC)) }
+                .filter { seen.add(it.tripId + "|" + it.scheduled.epochSecond) }
+                .sortedBy { it.scheduled }
+        }
+
+        /**
+         * Drops trips that already left (passed, or overdue and not tracked) and orders the rest
+         * by best known arrival, so a late earlier trip shows ahead of the next scheduled one.
+         */
+        fun arrangeBoard(entries: List<BoardEntry>, now: Instant): List<BoardEntry> =
+            entries
+                .filter { it.live?.status != LiveStatus.PASSED }
+                .filter { (it.live?.best ?: it.departure.scheduled).isAfter(now.minusSeconds(60)) }
+                .sortedBy { it.live?.best ?: it.departure.scheduled }
+
         fun indexOfStop(calls: List<StopCall>, target: StopCall, from: Int = 0): Int? {
             for (i in from until calls.size) if (target.stopId != null && calls[i].stopId == target.stopId) return i
             // Fall back to the geographically closest stop.

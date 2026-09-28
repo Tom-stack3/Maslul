@@ -73,6 +73,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.maslul.app.data.Freshness
 import com.maslul.app.data.Itinerary
 import com.maslul.app.data.Leg
 import com.maslul.app.data.LiveApproach
@@ -82,6 +83,7 @@ import com.maslul.app.data.LiveStatus
 import com.maslul.app.data.Place
 import com.maslul.app.data.PlaceKind
 import com.maslul.app.data.TransitMode
+import com.maslul.app.data.freshness
 import com.maslul.app.live.ActiveTrip
 import com.maslul.app.live.LiveTripService
 import com.maslul.app.live.Reminders
@@ -89,7 +91,10 @@ import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
 import com.maslul.app.ui.components.Fmt
 import com.maslul.app.ui.components.LineBadge
-import com.maslul.app.ui.components.LiveDot
+import com.maslul.app.ui.components.LiveLocationCard
+import com.maslul.app.ui.components.LiveSignal
+import com.maslul.app.ui.components.freshnessColor
+import com.maslul.app.ui.components.rememberNow
 import com.maslul.app.ui.components.MapController
 import com.maslul.app.ui.components.MapLine
 import com.maslul.app.ui.components.MapMarker
@@ -115,6 +120,8 @@ import java.time.Instant
 class RouteDetailModel(nav: AppNav, val itinerary: Itinerary, val from: Place, val to: Place) : ScreenModel(nav) {
     val live = mutableStateMapOf<Int, LiveCall>()
     val approach = mutableStateMapOf<Int, LiveApproach>()
+    /** Leg index whose live vehicle the map follows, after tapping its arrival. */
+    var following by mutableStateOf<Int?>(null)
     private val transfers = Ranking.transfers(itinerary, store.data.value.settings.walkSpeed.mps)
 
     /** A tight connection onto [leg], if the previous vehicle leaves little spare time. */
@@ -212,6 +219,10 @@ fun RouteDetailScreen(model: RouteDetailModel) {
         val mapOnly = sheet.currentValue == SheetValue.Hidden && sheet.targetValue == SheetValue.Hidden
         val scope = rememberCoroutineScope()
         val mapController = remember { MapController() }
+        // Following a vehicle needs the map in view.
+        LaunchedEffect(model.following) {
+            if (model.following != null && sheet.currentValue == SheetValue.Expanded) sheet.partialExpand()
+        }
         BottomSheetScaffold(
             scaffoldState = scaffold,
             sheetPeekHeight = peek,
@@ -274,6 +285,15 @@ fun RouteDetailScreen(model: RouteDetailModel) {
                         modifier = Modifier.testTag("map_my_location"),
                     ) { Icon(Icons.Rounded.MyLocation, "My location", tint = MaterialTheme.colorScheme.primary) }
                 }
+                val followed = model.following?.let { i -> model.live[i]?.takeIf { it.status == LiveStatus.LIVE }?.vehicle?.let { i to it } }
+                if (followed != null) {
+                    LiveLocationCard(
+                        "${model.itinerary.legs[followed.first].lineLabel} live location",
+                        followed.second.recordedAt,
+                        Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(horizontal = 64.dp, vertical = 12.dp),
+                        onClose = { model.following = null },
+                    )
+                }
                 if (mapOnly) {
                     ExtendedFloatingActionButton(
                         onClick = { scope.launch { sheet.partialExpand() } },
@@ -312,11 +332,14 @@ private fun RouteMap(model: RouteDetailModel, modifier: Modifier, padding: Paddi
             add(MapMarker(itin.legs.last().to.point, Color(0xFFE5484D), MarkerKind.DESTINATION))
         }
     }
+    val now = rememberNow(10_000)
     val vehicles = model.live.entries.mapNotNull { (i, c) ->
         val v = c.vehicle ?: return@mapNotNull null
         val leg = itin.legs[i]
-        MapVehicle("v$i", v.point, v.bearing, lineColor(leg.mode, leg.routeColor), leg.lineLabel)
+        MapVehicle("v$i", v.point, v.bearing, lineColor(leg.mode, leg.routeColor), leg.lineLabel,
+            faded = Freshness.of(v.recordedAt, now) == Freshness.STALE)
     }
+    val followId = model.following?.let { "v$it" }?.takeIf { id -> vehicles.any { it.id == id } }
     // The live vehicle's way to the boarding stop, faded so it reads as "not your ride yet".
     val bg = MaterialTheme.colorScheme.background
     val approach = model.approach.entries.map { (i, a) ->
@@ -337,6 +360,8 @@ private fun RouteMap(model: RouteDetailModel, modifier: Modifier, padding: Paddi
         fitKey = "${itin.id}-$fitTag-$hasApproach",
         contentPadding = padding,
         controller = controller,
+        focusVehicleId = followId,
+        onUserPan = { model.following = null },
     )
 }
 
@@ -410,7 +435,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
                     below = rail,
                     node = Node.STOP,
                     nodeColor = c,
-                    time = { TimeText(leg.start, live?.takeIf { it.status == LiveStatus.LIVE }?.let { it.expected }) },
+                    time = { TimeText(leg.start, live?.takeIf { it.status == LiveStatus.LIVE }?.let { it.expected }, live.freshness(now)) },
                 ) {
                     Text(leg.from.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
                     leg.from.track?.let { Text("Platform $it", style = MaterialTheme.typography.bodySmall, color = x.subtle) }
@@ -424,7 +449,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
                     below = next?.let(::railOf),
                     node = Node.STOP,
                     nodeColor = c,
-                    time = { TimeText(leg.end, live?.alightExpected) },
+                    time = { TimeText(leg.end, live?.alightExpected, live.freshness(now)) },
                 ) {
                     Text(leg.to.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
                     Text("Get off", style = MaterialTheme.typography.bodySmall, color = x.subtle)
@@ -442,17 +467,18 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
 }
 
 @Composable
-private fun TimeText(scheduled: Instant, expected: Instant? = null) {
+private fun TimeText(scheduled: Instant, expected: Instant? = null, freshness: Freshness = Freshness.SCHEDULED) {
     val x = LocalExtra.current
+    // Live predictions: green while the position is fresh, amber once it stops updating.
+    val liveColor = freshnessColor(if (freshness == Freshness.SCHEDULED) Freshness.LIVE else freshness)
     Column {
         if (expected != null && Math.abs(expected.epochSecond - scheduled.epochSecond) >= 60) {
-            Text(Fmt.time(expected), style = MaterialTheme.typography.labelLarge.merge(Numeric),
-                color = delayColor(expected.epochSecond - scheduled.epochSecond))
+            Text(Fmt.time(expected), style = MaterialTheme.typography.labelLarge.merge(Numeric), color = liveColor)
             Text(Fmt.time(scheduled), style = MaterialTheme.typography.labelSmall.merge(Numeric), color = x.subtle,
                 textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough)
         } else {
             Text(Fmt.time(scheduled), style = MaterialTheme.typography.labelLarge.merge(Numeric),
-                color = if (expected != null) x.live else MaterialTheme.colorScheme.onSurface)
+                color = if (expected != null) liveColor else MaterialTheme.colorScheme.onSurface)
         }
     }
 }
@@ -505,7 +531,8 @@ private fun TransitSegment(model: RouteDetailModel, leg: Leg, rail: RailSpec, li
             }
         }
         Spacer(Modifier.height(6.dp))
-        LiveStatusChip(live, leg, now)
+        val legIndex = model.itinerary.legs.indexOf(leg)
+        LiveStatusChip(live, leg, now, onClick = { model.following = legIndex })
         leg.alerts.forEach { a ->
             Row(Modifier.padding(top = 6.dp)) {
                 Icon(Icons.Rounded.WarningAmber, null, tint = Color(0xFFF5A524), modifier = Modifier.size(16.dp))
@@ -539,28 +566,37 @@ private fun TransitSegment(model: RouteDetailModel, leg: Leg, rail: RailSpec, li
 }
 
 @Composable
-fun LiveStatusChip(live: LiveCall?, leg: Leg, now: Instant) {
+fun LiveStatusChip(live: LiveCall?, leg: Leg, now: Instant, onClick: (() -> Unit)? = null) {
     val x = LocalExtra.current
+    val freshness = live.freshness(now)
     val (text, color, dot) = when (live?.status) {
         LiveStatus.LIVE -> {
             val eta = live.expected ?: leg.start
             val away = live.stopsAway?.takeIf { it in 1..40 }?.let { " · $it stop${if (it > 1) "s" else ""} away" } ?: ""
-            Triple("Arrives ${Fmt.relative(eta, now).let { if (it == "Now") "now" else "in $it" }}$away", delayColor(live.delaySec), true)
+            Triple("Arrives ${Fmt.relative(eta, now).let { if (it == "Now") "now" else "in $it" }}$away", freshnessColor(freshness), true)
         }
         LiveStatus.PASSED -> Triple("Already passed this stop — check the next one", x.late, false)
         LiveStatus.UNTRACKED -> Triple("No live data · scheduled ${Fmt.time(leg.start)}", x.subtle, false)
         LiveStatus.SCHEDULED -> Triple("Scheduled ${Fmt.time(leg.start)} · not departed yet", x.subtle, false)
         null -> Triple("Timetable ${Fmt.time(leg.start)}", x.subtle, false)
     }
+    // A live vehicle can be shown on the map; timetable-only rows aren't tappable.
+    val tappable = onClick != null && live?.status == LiveStatus.LIVE && live.vehicle != null
     Row(
-        Modifier.clip(RoundedCornerShape(10.dp)).background(color.copy(alpha = 0.1f)).padding(horizontal = 10.dp, vertical = 6.dp),
+        Modifier.clip(RoundedCornerShape(10.dp)).background(color.copy(alpha = 0.1f))
+            .then(if (tappable) Modifier.clickable(onClickLabel = "Show on map") { onClick!!() } else Modifier)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (dot) { LiveDot(color); Spacer(Modifier.width(6.dp)) }
+        if (dot) { LiveSignal(freshness, size = 13.dp); Spacer(Modifier.width(6.dp)) }
         Text(text, style = MaterialTheme.typography.labelMedium, color = color)
         if (live?.status == LiveStatus.LIVE) {
             Spacer(Modifier.width(8.dp))
-            Pill(delayText(live.delaySec), color, filled = true)
+            Pill(delayText(live.delaySec), delayColor(live.delaySec), filled = true)
+        }
+        if (tappable) {
+            Spacer(Modifier.width(6.dp))
+            Icon(Icons.Rounded.MyLocation, null, tint = color, modifier = Modifier.size(16.dp))
         }
     }
 }

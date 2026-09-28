@@ -1,6 +1,8 @@
 package com.maslul.app.ui.lines
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -8,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -17,6 +20,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,13 +38,16 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.maslul.app.data.Freshness
 import com.maslul.app.data.Leg
 import com.maslul.app.data.TripTimeline
+import com.maslul.app.data.freshness
 import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
 import com.maslul.app.ui.components.Fmt
 import com.maslul.app.ui.components.LineBadge
-import com.maslul.app.ui.components.LiveDot
+import com.maslul.app.ui.components.LiveLocationCard
+import com.maslul.app.ui.components.LiveSignal
 import com.maslul.app.ui.components.LoadingBox
 import com.maslul.app.ui.components.MapLine
 import com.maslul.app.ui.components.MapMarker
@@ -55,11 +62,16 @@ import com.maslul.app.ui.components.TimelineRow
 import com.maslul.app.ui.components.TransitMap
 import com.maslul.app.ui.components.delayColor
 import com.maslul.app.ui.components.delayText
+import com.maslul.app.ui.components.freshnessColor
 import com.maslul.app.ui.components.lineColor
+import com.maslul.app.ui.components.rememberNow
 import com.maslul.app.ui.theme.LocalExtra
 import com.maslul.app.ui.theme.Numeric
 import kotlinx.coroutines.delay
 import java.time.Instant
+
+/** Map id of the trip's live vehicle. */
+private const val VEHICLE_ID = "veh"
 
 /** A single trip: every stop with scheduled and live-predicted times. */
 class TripModel(
@@ -67,7 +79,10 @@ class TripModel(
     val tripId: String,
     val boardStopId: String? = null,
     val alightStopId: String? = null,
+    /** Opened by tapping a live arrival time: the map zooms to the vehicle and follows it. */
+    focusVehicle: Boolean = false,
 ) : ScreenModel(nav) {
+    var following by mutableStateOf(focusVehicle)
     var trip by mutableStateOf<Leg?>(null)
     var progress by mutableStateOf<TripTimeline.Progress?>(null)
     var loading by mutableStateOf(true)
@@ -126,22 +141,54 @@ private fun TripBody(model: TripModel, trip: Leg, now: Instant) {
     val board = calls.indexOfFirst { it.stopId != null && it.stopId == model.boardStopId }
     val alight = calls.indexOfFirst { it.stopId != null && it.stopId == model.alightStopId }
 
-    TransitMap(
-        Modifier.fillMaxWidth().height(230.dp),
-        lines = listOf(MapLine(trip.geometry.ifEmpty { calls.map { it.point } }, color, 5f)),
-        markers = calls.mapIndexed { i, c ->
-            MapMarker(c.point, color, if (i == board || i == alight || i == 0 || i == calls.lastIndex) MarkerKind.STOP else MarkerKind.STOP_SMALL)
-        },
-        vehicles = listOfNotNull(p?.let { MapVehicle("veh", it.vehicle.point, it.vehicle.bearing, color, trip.lineLabel) }),
-        fitPoints = remember(trip) { calls.map { it.point } },
-        fitKey = trip.tripId,
-    )
-    Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 20.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically) {
+    val following = model.following && p != null
+    Box(Modifier.fillMaxWidth().height(230.dp)) {
+        TransitMap(
+            Modifier.fillMaxSize(),
+            lines = listOf(MapLine(trip.geometry.ifEmpty { calls.map { it.point } }, color, 5f)),
+            markers = calls.mapIndexed { i, c ->
+                MapMarker(c.point, color, if (i == board || i == alight || i == 0 || i == calls.lastIndex) MarkerKind.STOP else MarkerKind.STOP_SMALL)
+            },
+            vehicles = listOfNotNull(p?.let {
+                MapVehicle(VEHICLE_ID, it.vehicle.point, it.vehicle.bearing, color, trip.lineLabel, faded = it.freshness(now) == Freshness.STALE)
+            }),
+            fitPoints = remember(trip) { calls.map { it.point } },
+            fitKey = trip.tripId,
+            // Leave room for the live card at the top.
+            contentPadding = PaddingValues(top = if (following) 56.dp else 0.dp),
+            focusVehicleId = VEHICLE_ID.takeIf { following },
+            onUserPan = { model.following = false },
+        )
+        if (following) {
+            LiveLocationCard(
+                "${trip.lineLabel} live location",
+                p!!.vehicle.recordedAt,
+                Modifier.padding(8.dp).align(Alignment.TopCenter),
+                onClose = { model.following = false },
+            )
+        }
+    }
+    Row(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
+            .clickable(enabled = p != null, onClickLabel = "Show on map") { model.following = true }
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         if (p != null) {
-            LiveDot(delayColor(p.delaySec))
+            val tick = rememberNow()
+            val f = p.freshness(tick)
+            LiveSignal(f, size = 14.dp)
             Spacer(Modifier.width(8.dp))
-            Text("Live · updated ${Fmt.time(p.vehicle.recordedAt)}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            Text(
+                (if (f == Freshness.LIVE) "Live · " else "Not updating · ") + Fmt.ago(p.vehicle.recordedAt, tick).replaceFirstChar { it.lowercase() },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (f == Freshness.LIVE) MaterialTheme.colorScheme.onSurface else x.stale,
+                modifier = Modifier.weight(1f),
+            )
+            if (!model.following) {
+                Icon(Icons.Rounded.MyLocation, "Show on map", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+            }
             Pill(delayText(p.delaySec), delayColor(p.delaySec))
         } else {
             val start = trip.from.scheduledTime
@@ -159,6 +206,8 @@ private fun TripBody(model: TripModel, trip: Leg, now: Instant) {
     val state = rememberLazyListState(initialFirstVisibleItemIndex = ((if (board >= 0) board else (p?.lastPassed ?: 0)) - 2).coerceAtLeast(0))
     val rail = RailSpec(Rail.SOLID, color)
     val passedRail = RailSpec(Rail.FADED, color)
+    // Predicted times are green while the position is fresh, amber once it stops updating.
+    val liveColor = freshnessColor(p?.freshness(now) ?: Freshness.SCHEDULED)
     LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp)) {
         itemsIndexed(calls) { i, c ->
             val passed = p != null && i <= p.lastPassed
@@ -176,12 +225,12 @@ private fun TripBody(model: TripModel, trip: Leg, now: Instant) {
                         Column {
                             if (predicted != null && sched != null && Math.abs(predicted.epochSecond - sched.epochSecond) >= 60) {
                                 Text(Fmt.time(predicted), style = MaterialTheme.typography.labelLarge.merge(Numeric),
-                                    color = delayColor(predicted.epochSecond - sched.epochSecond))
+                                    color = liveColor)
                                 Text(Fmt.time(sched), style = MaterialTheme.typography.labelSmall.merge(Numeric), color = x.subtle,
                                     textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough)
                             } else {
                                 Text(sched?.let(Fmt::time) ?: "", style = MaterialTheme.typography.labelLarge.merge(Numeric),
-                                    color = if (predicted != null) x.live else MaterialTheme.colorScheme.onSurface)
+                                    color = if (predicted != null) liveColor else MaterialTheme.colorScheme.onSurface)
                             }
                         }
                     },

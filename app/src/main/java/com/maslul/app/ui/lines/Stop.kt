@@ -2,7 +2,6 @@ package com.maslul.app.ui.lines
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -46,26 +45,27 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.maslul.app.data.BoardEntry
+import com.maslul.app.data.Freshness
 import com.maslul.app.data.LiveStatus
 import com.maslul.app.data.Place
+import com.maslul.app.data.freshness
+import com.maslul.app.data.recordedAt
 import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
+import com.maslul.app.ui.components.ArrivalTime
 import com.maslul.app.ui.components.Fmt
 import com.maslul.app.ui.components.Hairline
 import com.maslul.app.ui.components.LineBadge
-import com.maslul.app.ui.components.LiveDot
 import com.maslul.app.ui.components.LoadingBox
 import com.maslul.app.ui.components.MapMarker
 import com.maslul.app.ui.components.MarkerKind
 import com.maslul.app.ui.components.MessageBox
 import com.maslul.app.ui.components.TransitMap
-import com.maslul.app.ui.components.delayColor
 import com.maslul.app.ui.components.lineColor
 import com.maslul.app.ui.nav.CurrentLocation
 import com.maslul.app.ui.nav.RoutesModel
 import com.maslul.app.ui.theme.LocalExtra
 import com.maslul.app.ui.theme.ModeColors
-import com.maslul.app.ui.theme.Numeric
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -90,7 +90,9 @@ class StopModel(nav: AppNav, val place: Place) : ScreenModel(nav) {
         }
     }
 
-    fun open(e: BoardEntry) = nav.push(TripModel(nav, e.departure.tripId, boardStopId = place.stopId))
+    /** Opens the trip; with [focusVehicle] its map zooms to the live vehicle and follows it. */
+    fun open(e: BoardEntry, focusVehicle: Boolean = false) =
+        nav.push(TripModel(nav, e.departure.tripId, boardStopId = place.stopId, focusVehicle = focusVehicle))
     fun toggleFavorite() = store.toggleFavoriteStop(place)
     fun directions() = nav.push(RoutesModel(nav, CurrentLocation, place))
 }
@@ -143,7 +145,7 @@ fun StopScreen(model: StopModel) {
                 groups.isEmpty() -> MessageBox("No upcoming departures", body = "Nothing scheduled from this stop in the next hours.")
                 else -> LazyColumn(Modifier.fillMaxSize().testTag("stop_board"), contentPadding = PaddingValues(bottom = 96.dp)) {
                     items(groups, key = { it.key }) { g ->
-                        BoardRow(g, now) { model.open(g.first) }
+                        BoardRow(g, now, onTimeClick = { model.open(g.first, focusVehicle = true) }) { model.open(g.first) }
                         Hairline(start = 20.dp)
                     }
                     item { Spacer(Modifier.navigationBarsPadding()) }
@@ -161,7 +163,7 @@ fun StopScreen(model: StopModel) {
 }
 
 @Composable
-private fun BoardRow(g: BoardGroup, now: Instant, onClick: () -> Unit) {
+private fun BoardRow(g: BoardGroup, now: Instant, onTimeClick: () -> Unit, onClick: () -> Unit) {
     val x = LocalExtra.current
     val d = g.first.departure
     Row(
@@ -180,20 +182,20 @@ private fun BoardRow(g: BoardGroup, now: Instant, onClick: () -> Unit) {
         Spacer(Modifier.width(8.dp))
         val live = g.first.live
         val t = live?.best ?: d.scheduled
+        val freshness = live.freshness(now)
         Column(horizontalAlignment = Alignment.End) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
-                if (live?.status == LiveStatus.LIVE) {
-                    LiveDot(delayColor(live.delaySec))
-                    Spacer(Modifier.width(5.dp))
-                }
-                Text(
-                    Fmt.relative(t, now),
-                    style = MaterialTheme.typography.titleMedium.merge(Numeric),
-                    color = if (live?.status == LiveStatus.LIVE) delayColor(live.delaySec) else MaterialTheme.colorScheme.onSurface,
-                )
-            }
+            // Tapping a live time shows that vehicle on the trip map; timetable times just open the trip.
+            ArrivalTime(
+                Fmt.relative(t, now),
+                freshness,
+                onClick = onTimeClick.takeIf { live?.vehicle != null && live.status == LiveStatus.LIVE },
+            )
             val sub = when (live?.status) {
-                LiveStatus.LIVE -> if (Math.abs(live.delaySec) >= 60) "sched. ${Fmt.time(d.scheduled)}" else "live"
+                LiveStatus.LIVE -> when {
+                    freshness == Freshness.STALE -> live.recordedAt?.let { Fmt.ago(it, now).lowercase() } ?: "live"
+                    Math.abs(live.delaySec) >= 60 -> "sched. ${Fmt.time(d.scheduled)}"
+                    else -> "live"
+                }
                 LiveStatus.UNTRACKED -> "no live data"
                 else -> if (t.epochSecond - now.epochSecond < 3600) Fmt.time(t) else "scheduled"
             }

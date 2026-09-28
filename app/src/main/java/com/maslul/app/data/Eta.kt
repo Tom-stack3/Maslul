@@ -94,7 +94,7 @@ class TripTimeline(
             delaySec = delay,
             lastPassed = lastPassed,
             predicted = predicted,
-            stale = now.epochSecond - v.recordedAt.epochSecond > 180,
+            stale = Freshness.isStale(v.recordedAt, now),
         )
     }
 

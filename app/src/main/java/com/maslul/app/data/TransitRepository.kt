@@ -18,7 +18,14 @@ data class LineDetail(
 data class LineVehicle(val vehicle: Vehicle, val progress: TripTimeline.Progress, val ride: Ride?)
 
 /** Next arrival at one stop of a line. */
-data class StopArrival(val time: Instant, val live: Boolean, val delaySec: Long, val journeyRef: String?)
+data class StopArrival(
+    val time: Instant,
+    val live: Boolean,
+    val delaySec: Long,
+    val journeyRef: String?,
+    /** When the live vehicle last reported its position; null for timetable arrivals. */
+    val recordedAt: Instant? = null,
+)
 
 data class BoardEntry(val departure: Departure, val live: LiveCall?)
 
@@ -225,7 +232,7 @@ class TransitRepository(
         for (lv in vehicles) {
             lv.vehicle.journeyRef?.let(liveRefs::add)
             val t = lv.progress.predicted.getOrNull(index) ?: continue
-            out += StopArrival(t, true, lv.progress.delaySec, lv.vehicle.journeyRef)
+            out += StopArrival(t, true, lv.progress.delaySec, lv.vehicle.journeyRef, lv.vehicle.recordedAt)
         }
         val offset = detail.stops[index].offsetSec
         for (r in detail.rides) {

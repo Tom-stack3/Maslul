@@ -276,7 +276,7 @@ private fun setupLayers(s: Style, dark: Boolean) {
             PropertyFactory.textField(Expression.get("label")),
             PropertyFactory.textFont(arrayOf("Noto Sans Bold")),
             PropertyFactory.textSize(11f),
-            PropertyFactory.textColor("#FFFFFF"),
+            PropertyFactory.textColor(Expression.toColor(Expression.get("tcolor"))),
             PropertyFactory.textAllowOverlap(true),
             PropertyFactory.textIgnorePlacement(true),
         ),
@@ -319,6 +319,7 @@ private fun vehiclesFc(vs: List<MapVehicle>) = FeatureCollection.fromFeatures(
         Feature.fromGeometry(Point.fromLngLat(v.point.lon, v.point.lat)).apply {
             addStringProperty("id", v.id)
             addStringProperty("label", v.label.take(4))
+            addStringProperty("tcolor", hex(contentColorOn(v.color)))
             addStringProperty("icon", iconName(v.color, v.bearing != null))
             addNumberProperty("bearing", v.bearing ?: 0f)
         }

@@ -46,6 +46,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -53,7 +54,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.maslul.app.data.Departure
+import com.maslul.app.data.Leg
+import com.maslul.app.data.LineRoute
 import com.maslul.app.data.LiveCall
+import com.maslul.app.data.Operators
 import com.maslul.app.data.LiveStatus
 import com.maslul.app.data.TransitMode
 import com.maslul.app.ui.theme.LocalExtra
@@ -82,8 +87,47 @@ fun modeName(mode: TransitMode): String = when (mode) {
     TransitMode.OTHER -> "Transit"
 }
 
-fun lineColor(mode: TransitMode, routeColor: Int?): Color =
-    routeColor?.let { Color(it) }?.takeIf { it != Color.White && it != Color.Black } ?: ModeColors.of(mode)
+/**
+ * Colour of a line: the feed's route_color if it has a meaningful one, else the operator's
+ * brand colour (Egged green, Dan blue, Metropoline orange…), else the mode colour.
+ */
+fun lineColor(mode: TransitMode, routeColor: Int?, agencyId: String? = null, agencyName: String? = null): Color =
+    routeColor?.let { Color(it) }?.takeIf { it != Color.White && it != Color.Black }
+        ?: Operators.colorOf(agencyId, agencyName)?.let { Color(it) }
+        ?: ModeColors.of(mode)
+
+fun lineColor(leg: Leg): Color = lineColor(leg.mode, leg.routeColor, leg.agencyId, leg.agencyName)
+
+fun lineColor(d: Departure): Color = lineColor(d.mode, d.routeColor, d.agencyId, d.agency)
+
+fun lineColor(r: LineRoute): Color =
+    Operators.findByRef(r.operatorRef, r.agency)?.let { Color(it.color) } ?: ModeColors.of(r.mode)
+
+/** Black or white, whichever has the higher contrast on [bg]. */
+fun contentColorOn(bg: Color): Color =
+    if (Operators.prefersDarkText(bg.toArgb())) Color(0xFF111111) else Color.White
+
+/**
+ * [color] used as text/icon on the current surface: light brand colours (yellow, orange) are
+ * darkened in light mode and dark ones (navy) lightened in dark mode until they read at 3:1.
+ */
+@Composable
+fun readableAccent(color: Color): Color {
+    val bg = MaterialTheme.colorScheme.surface
+    val towards = MaterialTheme.colorScheme.onSurface
+    fun ratio(c: Color): Float {
+        val a = c.luminance() + 0.05f
+        val b = bg.luminance() + 0.05f
+        return maxOf(a, b) / minOf(a, b)
+    }
+    var c = color
+    var t = 0f
+    while (ratio(c) < 3f && t < 1f) {
+        t += 0.1f
+        c = androidx.compose.ui.graphics.lerp(color, towards, t)
+    }
+    return c
+}
 
 /** Rounded line-number pill with the mode icon, e.g. [🚌 480]. */
 @Composable
@@ -95,7 +139,7 @@ fun LineBadge(
     showIcon: Boolean = true,
     large: Boolean = false,
 ) {
-    val fg = if (color.luminance() > 0.6f) Color.Black else Color.White
+    val fg = contentColorOn(color)
     Row(
         modifier
             .clip(RoundedCornerShape(if (large) 10.dp else 8.dp))

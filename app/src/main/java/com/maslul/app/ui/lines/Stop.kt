@@ -168,7 +168,7 @@ private fun BoardRow(g: BoardGroup, now: Instant, onClick: () -> Unit) {
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.widthIn(min = 64.dp)) { LineBadge(d.lineLabel, d.mode, color = lineColor(d.mode, d.routeColor)) }
+        Box(Modifier.widthIn(min = 64.dp)) { LineBadge(d.lineLabel, d.mode, color = lineColor(d)) }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(d.headsign, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,

@@ -92,6 +92,8 @@ data class Leg(
     val geometry: List<GeoPoint>,
     val steps: List<WalkStep> = emptyList(),
     val alerts: List<String> = emptyList(),
+    /** GTFS agency_id (== Stride operator_ref); with [agencyName] picks the operator colour. */
+    val agencyId: String? = null,
 ) {
     val durationSec get() = end.epochSecond - start.epochSecond
     val lineLabel: String
@@ -137,6 +139,7 @@ data class Departure(
     val routeColor: Int?,
     val scheduled: Instant,
     val stop: StopCall,
+    val agencyId: String? = null,
 )
 
 /** One gtfs route (a direction/alternative of a line) from Stride. */

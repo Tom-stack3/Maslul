@@ -113,8 +113,6 @@ import com.maslul.app.ui.lines.TripModel
 import com.maslul.app.ui.components.LoadingBox
 import com.maslul.app.ui.components.MessageBox
 import com.maslul.app.ui.components.Pill
-import com.maslul.app.ui.components.delayColor
-import com.maslul.app.ui.components.delayText
 import com.maslul.app.ui.components.lineColor
 import com.maslul.app.ui.components.modeIcon
 import com.maslul.app.ui.components.modeName
@@ -716,7 +714,7 @@ private fun LeaveIn(leaveAt: Instant, now: Instant, freshness: Freshness) {
     }
 }
 
-/** "● 116 arrives in 4 min at X · 2 min late" style summary for a boarding. */
+/** "● 116 in 4 min · 3 stops away, at X" style summary for a boarding. */
 @Composable
 fun LiveLine(
     label: String,
@@ -738,7 +736,6 @@ fun LiveLine(
     ) {
         when (live?.status) {
             LiveStatus.LIVE -> {
-                val c = delayColor(live.delaySec)
                 val f = live.freshness(now)
                 LiveSignal(f, size = 14.dp)
                 Spacer(Modifier.width(8.dp))
@@ -758,7 +755,6 @@ fun LiveLine(
                     )
                     Text("at $stop", style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                Pill(delayText(live.delaySec), c)
             }
             LiveStatus.PASSED -> {
                 Icon(Icons.Rounded.WarningAmber, null, tint = x.late, modifier = Modifier.size(16.dp))

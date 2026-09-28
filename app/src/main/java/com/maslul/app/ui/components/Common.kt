@@ -181,39 +181,13 @@ fun LiveDot(color: Color = LocalExtra.current.live, size: Dp = 7.dp) {
     Box(Modifier.size(size).alpha(a).clip(CircleShape).background(color))
 }
 
-@Composable
-fun delayColor(delaySec: Long): Color {
-    val x = LocalExtra.current
-    return when {
-        delaySec >= 120 -> x.late
-        delaySec <= -90 -> x.early
-        else -> x.live
-    }
-}
-
-fun delayText(delaySec: Long): String {
-    val m = Math.round(delaySec / 60.0)
-    return when {
-        m >= 1 -> "$m min late"
-        m <= -1 -> "${-m} min early"
-        else -> "On time"
-    }
-}
-
 /** "3 min", "Now", or a clock time for far-off departures. */
 @Composable
 fun MinutesText(call: LiveCall?, fallback: java.time.Instant, now: java.time.Instant, modifier: Modifier = Modifier) {
     val t = call?.best ?: fallback
-    val live = call?.status == LiveStatus.LIVE
     Column(modifier, horizontalAlignment = Alignment.End) {
         ArrivalTime(Fmt.relative(t, now), call.freshness(now))
-        if (live && Math.abs(call!!.delaySec) >= 60) {
-            Text(
-                "${Fmt.time(call.scheduled)} sched.",
-                style = MaterialTheme.typography.labelSmall,
-                color = LocalExtra.current.subtle,
-            )
-        } else if (call?.status == LiveStatus.UNTRACKED) {
+        if (call?.status == LiveStatus.UNTRACKED) {
             Text("no live data", style = MaterialTheme.typography.labelSmall, color = LocalExtra.current.subtle)
         }
     }

@@ -90,8 +90,6 @@ import com.maslul.app.ui.components.Rail
 import com.maslul.app.ui.components.RailSpec
 import com.maslul.app.ui.components.TimelineRow
 import com.maslul.app.ui.components.TransitMap
-import com.maslul.app.ui.components.delayColor
-import com.maslul.app.ui.components.delayText
 import com.maslul.app.ui.components.modeIcon
 import com.maslul.app.ui.theme.LocalExtra
 import com.maslul.app.ui.theme.Numeric
@@ -373,7 +371,6 @@ private fun FlowRow2(content: @Composable () -> Unit) {
 @Composable
 private fun VehicleRow(v: LineVehicle, rail: RailSpec, color: Color, label: String, mode: TransitMode, now: Instant, onClick: () -> Unit) {
     val x = LocalExtra.current
-    val c = delayColor(v.progress.delaySec)
     TimelineRow(rail, rail, Node.VEHICLE, color, timeWidth = 12.dp, nodeY = 18.dp,
         modifier = Modifier.clickable(onClickLabel = "Show on map", onClick = onClick)) {
         Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -387,7 +384,6 @@ private fun VehicleRow(v: LineVehicle, rail: RailSpec, color: Color, label: Stri
                 Text(label, style = MaterialTheme.typography.labelMedium, color = accent, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.width(8.dp))
-            Pill(delayText(v.progress.delaySec), c)
             val f = v.progress.freshness(now)
             Spacer(Modifier.width(6.dp))
             LiveSignal(f, size = 12.dp)

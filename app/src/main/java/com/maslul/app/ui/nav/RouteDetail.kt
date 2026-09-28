@@ -108,8 +108,6 @@ import com.maslul.app.ui.components.Rail
 import com.maslul.app.ui.components.RailSpec
 import com.maslul.app.ui.components.TimelineRow
 import com.maslul.app.ui.components.TransitMap
-import com.maslul.app.ui.components.delayColor
-import com.maslul.app.ui.components.delayText
 import com.maslul.app.ui.components.lineColor
 import com.maslul.app.ui.components.modeName
 import com.maslul.app.ui.lines.TripModel
@@ -509,14 +507,8 @@ private fun TimeText(scheduled: Instant, expected: Instant? = null, freshness: F
     // Live predictions: green while the position is fresh, amber once it stops updating.
     val liveColor = freshnessColor(if (freshness == Freshness.SCHEDULED) Freshness.LIVE else freshness)
     Column {
-        if (expected != null && Math.abs(expected.epochSecond - scheduled.epochSecond) >= 60) {
-            Text(Fmt.time(expected), style = MaterialTheme.typography.labelLarge.merge(Numeric), color = liveColor)
-            Text(Fmt.time(scheduled), style = MaterialTheme.typography.labelSmall.merge(Numeric), color = x.subtle,
-                textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough)
-        } else {
-            Text(Fmt.time(scheduled), style = MaterialTheme.typography.labelLarge.merge(Numeric),
-                color = if (expected != null) liveColor else MaterialTheme.colorScheme.onSurface)
-        }
+        Text(Fmt.time(expected ?: scheduled), style = MaterialTheme.typography.labelLarge.merge(Numeric),
+            color = if (expected != null) liveColor else MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -689,10 +681,6 @@ fun LiveStatusChip(live: LiveCall?, leg: Leg, now: Instant, onClick: (() -> Unit
     ) {
         if (dot) { LiveSignal(freshness, size = 13.dp); Spacer(Modifier.width(6.dp)) }
         Text(text, style = MaterialTheme.typography.labelMedium, color = color)
-        if (live?.status == LiveStatus.LIVE) {
-            Spacer(Modifier.width(8.dp))
-            Pill(delayText(live.delaySec), delayColor(live.delaySec), filled = true)
-        }
         if (tappable) {
             Spacer(Modifier.width(6.dp))
             Icon(Icons.Rounded.MyLocation, null, tint = color, modifier = Modifier.size(16.dp))

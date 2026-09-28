@@ -60,8 +60,6 @@ import com.maslul.app.ui.components.Rail
 import com.maslul.app.ui.components.RailSpec
 import com.maslul.app.ui.components.TimelineRow
 import com.maslul.app.ui.components.TransitMap
-import com.maslul.app.ui.components.delayColor
-import com.maslul.app.ui.components.delayText
 import com.maslul.app.ui.components.freshnessColor
 import com.maslul.app.ui.components.lineColor
 import com.maslul.app.ui.components.readableAccent
@@ -190,7 +188,6 @@ private fun TripBody(model: TripModel, trip: Leg, now: Instant) {
                 Icon(Icons.Rounded.MyLocation, "Show on map", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(10.dp))
             }
-            Pill(delayText(p.delaySec), delayColor(p.delaySec))
         } else {
             val start = trip.from.scheduledTime
             Text(
@@ -224,15 +221,9 @@ private fun TripBody(model: TripModel, trip: Leg, now: Instant) {
                     modifier = Modifier.alpha(if (passed) 0.5f else 1f),
                     time = {
                         Column {
-                            if (predicted != null && sched != null && Math.abs(predicted.epochSecond - sched.epochSecond) >= 60) {
-                                Text(Fmt.time(predicted), style = MaterialTheme.typography.labelLarge.merge(Numeric),
-                                    color = liveColor)
-                                Text(Fmt.time(sched), style = MaterialTheme.typography.labelSmall.merge(Numeric), color = x.subtle,
-                                    textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough)
-                            } else {
-                                Text(sched?.let(Fmt::time) ?: "", style = MaterialTheme.typography.labelLarge.merge(Numeric),
-                                    color = if (predicted != null) liveColor else MaterialTheme.colorScheme.onSurface)
-                            }
+                            // Only when it'll actually be there; how late that is vs the timetable isn't useful.
+                            Text((predicted ?: sched)?.let(Fmt::time) ?: "", style = MaterialTheme.typography.labelLarge.merge(Numeric),
+                                color = if (predicted != null) liveColor else MaterialTheme.colorScheme.onSurface)
                         }
                     },
                 ) {

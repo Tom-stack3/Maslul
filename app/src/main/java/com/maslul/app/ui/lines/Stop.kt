@@ -193,7 +193,6 @@ private fun BoardRow(g: BoardGroup, now: Instant, onTimeClick: () -> Unit, onCli
             val sub = when (live?.status) {
                 LiveStatus.LIVE -> when {
                     freshness == Freshness.STALE -> live.recordedAt?.let { Fmt.ago(it, now).lowercase() } ?: "live"
-                    Math.abs(live.delaySec) >= 60 -> "sched. ${Fmt.time(d.scheduled)}"
                     else -> "live"
                 }
                 LiveStatus.UNTRACKED -> "no live data"

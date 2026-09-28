@@ -62,9 +62,9 @@ import com.maslul.app.data.IsraelZone
 import com.maslul.app.data.LineDetail
 import com.maslul.app.data.LineRoute
 import com.maslul.app.data.LineStop
+import com.maslul.app.data.LineUnavailableException
 import com.maslul.app.data.LineVehicle
 import com.maslul.app.data.Ride
-import com.maslul.app.data.TripIds
 import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
 import com.maslul.app.ui.components.Fmt
@@ -117,10 +117,17 @@ class LineModel(nav: AppNav, route: LineRoute) : ScreenModel(nav) {
             val v = async { runCatching { repo.lineVariants(current) }.getOrNull() }
             runCatching { repo.lineDetail(current) }
                 .onSuccess { detail = it; refreshLive() }
-                .onFailure { error = it.message ?: "Couldn't load this line" }
+                .onFailure {
+                    error = (it as? LineUnavailableException)?.message
+                        ?: "Couldn't load this line. Check your connection and try again."
+                }
             v.await()?.let { variants = it }
             loading = false
         }
+    }
+
+    fun retry() {
+        if (!loading) load()
     }
 
     suspend fun refreshLive() {
@@ -152,17 +159,14 @@ class LineModel(nav: AppNav, route: LineRoute) : ScreenModel(nav) {
 
     fun openStop(s: LineStop, onFail: () -> Unit) {
         scope.launch {
-            // Stride knows stop codes; Transitous needs the GTFS stop_id, so match by code nearby.
-            val p = GeoPoint(s.lat, s.lon)
-            val match = runCatching { repo.transitous.nearbyStops(p, 0.0015) }.getOrDefault(emptyList())
-                .firstOrNull { it.subtitle?.startsWith("#${s.code}") == true }
+            val match = repo.transitStop(s)
             if (match != null) nav.push(StopModel(nav, match.copy(name = s.name))) else onFail()
         }
     }
 
     fun openRide(r: Ride) {
-        val date = LocalDate.parse(route.date)
-        nav.push(TripModel(nav, TripIds.fromJourney(r.journeyRef, r.departure, date)))
+        val d = detail ?: return
+        scope.launch { nav.push(TripModel(nav, repo.rideTripId(d, r))) }
     }
 
     fun toggleFavorite() = store.toggleFavoriteLine(route)
@@ -222,7 +226,7 @@ fun LineScreen(model: LineModel) {
         val d = model.detail
         when {
             d == null && model.loading -> LoadingBox(text = "Loading line…")
-            d == null -> MessageBox("Line unavailable", body = model.error)
+            d == null -> MessageBox("Line unavailable", body = model.error, action = "Retry", onAction = model::retry)
             else -> {
                 LineMap(d, model.vehicles, color)
                 PrimaryTabRow(selectedTabIndex = model.tab, containerColor = MaterialTheme.colorScheme.surface) {

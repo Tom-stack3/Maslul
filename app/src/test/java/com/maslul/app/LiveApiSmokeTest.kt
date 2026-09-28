@@ -98,6 +98,31 @@ class LiveApiSmokeTest {
     }
 
     @Test
+    fun loadsStopsForCommonLinesInBothDirections() = runBlocking {
+        // Stride sometimes has a day's rides without their stops; every line must still show stops.
+        for (q in listOf("16", "92", "5", "1")) {
+            for (line in repo.searchLines(q, null).take(4)) {
+                for (variant in repo.lineVariants(repo.currentRoute(line.main)).take(2)) {
+                    val d = repo.lineDetail(variant)
+                    println("$q ${variant.gtfsRouteId} dir ${variant.direction}: ${d.stops.size} stops, ${d.rides.size} rides, shape ${d.shape.size}")
+                    assertTrue(d.stops.size >= 2)
+                    assertTrue(d.stops.zipWithNext().all { (a, b) -> a.sequence < b.sequence && a.offsetSec <= b.offsetSec })
+                    if (d.rides.isNotEmpty()) assertTrue("shape for ${variant.gtfsRouteId}", d.shape.size >= 2)
+                }
+            }
+        }
+        // Timetable rides open as Transitous trips.
+        val d16 = repo.lineDetail(repo.currentRoute(repo.searchLines("16", null).first().main))
+        assertTrue(repo.trip(repo.rideTripId(d16, d16.rides.first())) != null)
+        // A line opened from a stop board resolves through its GTFS route id.
+        val here = GeoPoint(32.0741, 34.7922)
+        val dep = repo.nearbyLines(here, repo.nearbyStops(here)).first { it.departure.mode == TransitMode.BUS }.departure
+        val d = repo.lineDetail(repo.lineRoute(dep.routeId)!!)
+        println("From stop: ${dep.lineLabel} → ${d.stops.size} stops, ${d.rides.size} rides")
+        assertTrue(d.stops.size >= 2)
+    }
+
+    @Test
     fun stopBoardHasDepartures() = runBlocking {
         val stops = repo.nearbyStops(GeoPoint(32.0741, 34.7922))
         assertTrue(stops.isNotEmpty())

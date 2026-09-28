@@ -77,22 +77,7 @@ class StrideApi(private val base: String = "https://open-bus-stride-api.hasadna.
             .addQueryParameter("arrival_time_to", to.toString())
             .addQueryParameter("limit", "300")
             .build()
-        val rows = Http.getJson<List<RideStopDto>>(url).sortedBy { it.stop_sequence }
-        val first = rows.firstOrNull()?.let { TransitousApi.instant(it.departure_time ?: it.arrival_time) }
-            ?: return emptyList()
-        return rows.map {
-            val t = TransitousApi.instant(it.arrival_time ?: it.departure_time) ?: first
-            LineStop(
-                gtfsStopId = it.gtfs_stop_id,
-                code = it.gtfs_stop__code?.toString() ?: "",
-                name = it.gtfs_stop__name ?: "",
-                city = it.gtfs_stop__city,
-                lat = it.gtfs_stop__lat ?: 0.0,
-                lon = it.gtfs_stop__lon ?: 0.0,
-                sequence = it.stop_sequence,
-                offsetSec = t.epochSecond - first.epochSecond,
-            )
-        }
+        return lineStops(Http.getJson(url))
     }
 
     /** Every departure of the route from its first stop during the service day. */
@@ -122,6 +107,26 @@ class StrideApi(private val base: String = "https://open-bus-stride-api.hasadna.
     }
 
     companion object {
+        /** Ride-stop rows (any order) → the ride's ordered stops with offsets from its first departure. */
+        fun lineStops(rows: List<RideStopDto>): List<LineStop> {
+            val sorted = rows.distinctBy { it.stop_sequence }.sortedBy { it.stop_sequence }
+            val first = sorted.firstOrNull()?.let { TransitousApi.instant(it.departure_time ?: it.arrival_time) }
+                ?: return emptyList()
+            return sorted.map {
+                val t = TransitousApi.instant(it.arrival_time ?: it.departure_time) ?: first
+                LineStop(
+                    gtfsStopId = it.gtfs_stop_id,
+                    code = it.gtfs_stop__code?.toString() ?: "",
+                    name = it.gtfs_stop__name ?: "",
+                    city = it.gtfs_stop__city,
+                    lat = it.gtfs_stop__lat ?: 0.0,
+                    lon = it.gtfs_stop__lon ?: 0.0,
+                    sequence = it.stop_sequence,
+                    offsetSec = t.epochSecond - first.epochSecond,
+                )
+            }
+        }
+
         fun gtfsRouteType(m: TransitMode): String? = when (m) {
             TransitMode.BUS -> "3"
             TransitMode.TRAIN -> "2"

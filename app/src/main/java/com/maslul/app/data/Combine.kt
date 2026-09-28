@@ -22,7 +22,7 @@ object Combine {
     /** Earlier-scheduled rides are kept as candidates this far back: they may be running late. */
     const val LATE_SEC = 30 * 60L
     /** Leeway when judging whether a bus can still be caught. */
-    private const val CATCH_SLACK_SEC = 60L
+    private const val CATCH_SLACK_SEC = 90L
 
     fun sameStop(a: StopCall, b: StopCall): Boolean {
         if (a.stopId != null && a.stopId == b.stopId) return true

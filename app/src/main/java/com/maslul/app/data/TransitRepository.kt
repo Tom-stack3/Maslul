@@ -48,6 +48,10 @@ class TransitRepository(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Leg>?) = size > 80
     }
 
+    private val rideCache = object : LinkedHashMap<String, List<Leg>>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<Leg>>?) = size > 60
+    }
+
     var language: String? = null
 
     // ---- Places ---------------------------------------------------------------------
@@ -73,6 +77,34 @@ class TransitRepository(
     // ---- Routing --------------------------------------------------------------------
 
     suspend fun plan(req: TransitousApi.PlanRequest): PlanResult = transitous.plan(req.copy(language = language))
+
+    /**
+     * Direct rides (any line) between [leg]'s boarding and alighting stops around its time,
+     * so an option can offer every line that makes the same hop. Cached per 15-minute bucket.
+     */
+    suspend fun rideAlternatives(leg: Leg, modes: Set<TransitMode>): List<Leg> {
+        val key = rideBucket(leg)
+        synchronized(rideCache) { rideCache[key] }?.let { return it }
+        val req = TransitousApi.PlanRequest(
+            from = leg.from.point,
+            to = leg.to.point,
+            fromStopId = leg.from.stopId,
+            toStopId = leg.to.stopId,
+            time = leg.start.minusSeconds(5 * 60),
+            modes = modes,
+            maxWalkMinutes = 3,
+            maxTransfers = 0,
+            minTransferMinutes = 0,
+            additionalTransferMinutes = 0,
+            numItineraries = 12,
+            language = language,
+        )
+        val rides = transitous.plan(req).itineraries
+            .mapNotNull { it.transitLegs.singleOrNull() }
+            .filter { Combine.sameRide(it, leg) }
+        synchronized(rideCache) { rideCache[key] = rides }
+        return rides
+    }
 
     suspend fun trip(tripId: String): Leg? {
         synchronized(tripCache) { tripCache[tripId] }?.let { return it }
@@ -385,6 +417,9 @@ class TransitRepository(
             return deps.firstOrNull { TripIds.parse(it.tripId)?.tripNumber == ride.tripNumber }?.tripId
                 ?: deps.firstOrNull { TripIds.lineRef(it.routeId) == lineRef.toString() && it.scheduled == at }?.tripId
         }
+
+        fun rideBucket(leg: Leg) =
+            "${leg.from.stopId ?: leg.from.point}|${leg.to.stopId ?: leg.to.point}|${leg.start.epochSecond / 900}"
 
         fun indexOfStop(calls: List<StopCall>, target: StopCall, from: Int = 0): Int? {
             for (i in from until calls.size) if (target.stopId != null && calls[i].stopId == target.stopId) return i

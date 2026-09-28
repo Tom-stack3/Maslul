@@ -94,8 +94,15 @@ data class Leg(
     val alerts: List<String> = emptyList(),
     /** GTFS agency_id (== Stride operator_ref); with [agencyName] picks the operator colour. */
     val agencyId: String? = null,
+    /** Other lines riding between the same two stops, for a combined option (see [Combine]). */
+    val alternatives: List<Leg> = emptyList(),
 ) {
     val durationSec get() = end.epochSecond - start.epochSecond
+    val combined get() = alternatives.isNotEmpty()
+    /** This ride and its alternatives, soonest departure first. */
+    val options: List<Leg> get() = if (alternatives.isEmpty()) listOf(this) else (alternatives + this).sortedBy { it.start }
+    /** Stable identity of one ride, for live-state maps. */
+    val rideKey: String get() = tripId ?: "$lineLabel@${start.epochSecond}"
     val lineLabel: String
         get() = routeShortName?.takeIf { it.isNotBlank() && it != "NaN" }
             ?: when (mode) {

@@ -49,6 +49,7 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -74,6 +75,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.maslul.app.data.Freshness
+import com.maslul.app.data.Combine
 import com.maslul.app.data.Itinerary
 import com.maslul.app.data.Leg
 import com.maslul.app.data.LiveApproach
@@ -117,26 +119,50 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
 
-class RouteDetailModel(nav: AppNav, val itinerary: Itinerary, val from: Place, val to: Place) : ScreenModel(nav) {
-    val live = mutableStateMapOf<Int, LiveCall>()
+class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: Place, val to: Place) : ScreenModel(nav) {
+    /** Live state of every ride option, by [Leg.rideKey]. */
+    val rideLive = mutableStateMapOf<String, LiveCall>()
     val approach = mutableStateMapOf<Int, LiveApproach>()
     /** Leg index whose live vehicle the map follows, after tapping its arrival. */
     var following by mutableStateOf<Int?>(null)
-    private val transfers = Ranking.transfers(itinerary, store.data.value.settings.walkSpeed.mps)
+
+    /** The itinerary with the line picked on each combined leg (initially the best one). */
+    var itinerary by mutableStateOf(original)
+        private set
+    private var transfers = Ranking.transfers(original, store.data.value.settings.walkSpeed.mps)
+
+    /** Live state of the ride currently chosen on leg [i]. */
+    fun live(i: Int): LiveCall? = itinerary.legs.getOrNull(i)?.takeIf { it.mode.isTransit }?.let { rideLive[it.rideKey] }
 
     /** A tight connection onto [leg], if the previous vehicle leaves little spare time. */
     fun tightTransferInto(leg: Leg) = transfers.firstOrNull { it.next === leg && it.tight }
 
+    /** Rides [option] (another line between the same stops) on leg [i] instead. */
+    fun choose(i: Int, option: Leg) {
+        itinerary = Combine.choose(itinerary, i, option)
+        transfers = Ranking.transfers(itinerary, store.data.value.settings.walkSpeed.mps)
+        approach.remove(i)
+        rideLive[option.rideKey]?.let { call -> scope.launch { updateApproach(i, itinerary.legs[i], call) } }
+    }
+
+    private suspend fun updateApproach(i: Int, leg: Leg, call: LiveCall) {
+        val a = runCatching { repo.approach(leg, call) }.getOrNull()
+        // The pick may have changed meanwhile.
+        if (itinerary.legs.getOrNull(i)?.rideKey != leg.rideKey) return
+        if (a != null) approach[i] = a else approach.remove(i)
+    }
+
     suspend fun liveLoop() {
         while (true) {
             val now = Instant.now()
-            itinerary.legs.forEachIndexed { i, leg ->
-                if (leg.mode.isTransit && leg.end.isAfter(now.minusSeconds(300))) {
+            itinerary.legs.forEachIndexed { i, chosen ->
+                if (!chosen.mode.isTransit) return@forEachIndexed
+                // Every line of a combined leg, so their buses and arrivals can be compared.
+                chosen.options.filter { it.end.isAfter(now.minusSeconds(300)) }.forEach { leg ->
                     scope.launch {
                         val call = runCatching { repo.legLive(leg, now) }.getOrNull() ?: return@launch
-                        live[i] = call
-                        val a = runCatching { repo.approach(leg, call) }.getOrNull()
-                        if (a != null) approach[i] = a else approach.remove(i)
+                        rideLive[leg.rideKey] = call
+                        if (leg.rideKey == itinerary.legs.getOrNull(i)?.rideKey) updateApproach(i, leg, call)
                     }
                 }
             }
@@ -154,7 +180,7 @@ class RouteDetailModel(nav: AppNav, val itinerary: Itinerary, val from: Place, v
     fun remind(ctx: Context) {
         val minutes = store.data.value.settings.reminderMinutes
         val first = itinerary.firstTransit
-        val call = itinerary.legs.indexOf(first).let { live[it] }
+        val call = live(itinerary.legs.indexOf(first))
         val walkBefore = first?.let { f -> itinerary.legs.takeWhile { it !== f }.sumOf { it.durationSec } } ?: 0
         val leaveAt = ((call?.takeIf { it.status == LiveStatus.LIVE }?.expected ?: first?.start ?: itinerary.start)
             .minusSeconds(walkBefore))
@@ -285,7 +311,7 @@ fun RouteDetailScreen(model: RouteDetailModel) {
                         modifier = Modifier.testTag("map_my_location"),
                     ) { Icon(Icons.Rounded.MyLocation, "My location", tint = MaterialTheme.colorScheme.primary) }
                 }
-                val followed = model.following?.let { i -> model.live[i]?.takeIf { it.status == LiveStatus.LIVE }?.vehicle?.let { i to it } }
+                val followed = model.following?.let { i -> model.live(i)?.takeIf { it.status == LiveStatus.LIVE }?.vehicle?.let { i to it } }
                 if (followed != null) {
                     LiveLocationCard(
                         "${model.itinerary.legs[followed.first].lineLabel} live location",
@@ -333,15 +359,26 @@ private fun RouteMap(model: RouteDetailModel, modifier: Modifier, padding: Paddi
         }
     }
     val now = rememberNow(10_000)
-    val vehicles = model.live.entries.mapNotNull { (i, c) ->
-        val v = c.vehicle ?: return@mapNotNull null
-        val leg = itin.legs[i]
-        MapVehicle("v$i", v.point, v.bearing, lineColor(leg), leg.lineLabel,
-            faded = Freshness.of(v.recordedAt, now) == Freshness.STALE)
-    }
-    val followId = model.following?.let { "v$it" }?.takeIf { id -> vehicles.any { it.id == id } }
-    // The live vehicle's way to the boarding stop, faded so it reads as "not your ride yet".
     val bg = MaterialTheme.colorScheme.background
+    // Other lines of a combined leg: drawn faded underneath, with their buses, so all can be compared.
+    val otherLines = remember(itin, x.isDark) {
+        itin.legs.flatMap { l ->
+            l.alternatives.map { o ->
+                MapLine(o.geometry.ifEmpty { listOf(o.from.point, o.to.point) }, lerp(lineColor(o), bg, 0.5f), 4f)
+            }
+        }
+    }
+    val vehicles = itin.legs.flatMap { leg ->
+        // The chosen ride's bus last, so it's drawn on top.
+        (leg.alternatives + leg).mapNotNull { o ->
+            val v = model.rideLive[o.rideKey]?.vehicle ?: return@mapNotNull null
+            val c = lineColor(o)
+            MapVehicle("v${o.rideKey}", v.point, v.bearing, if (o === leg) c else lerp(c, bg, 0.4f), o.lineLabel,
+                faded = Freshness.of(v.recordedAt, now) == Freshness.STALE)
+        }
+    }
+    val followId = model.following?.let { itin.legs.getOrNull(it)?.rideKey }?.let { "v$it" }?.takeIf { id -> vehicles.any { it.id == id } }
+    // The live vehicle's way to the boarding stop, faded so it reads as "not your ride yet".
     val approach = model.approach.entries.map { (i, a) ->
         val leg = itin.legs[i]
         val c = lerp(lineColor(leg), bg, 0.45f)
@@ -351,7 +388,7 @@ private fun RouteMap(model: RouteDetailModel, modifier: Modifier, padding: Paddi
     val hasApproach = model.approach.isNotEmpty()
     TransitMap(
         modifier = modifier,
-        lines = approach.map { it.first } + lines,
+        lines = otherLines + approach.map { it.first } + lines,
         markers = approach.flatMap { it.second } + markers,
         vehicles = vehicles,
         user = user,
@@ -428,7 +465,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
                 val c = lineColor(leg)
                 val rail = RailSpec(Rail.SOLID, c)
                 val prev = legs.getOrNull(i - 1)
-                val live = model.live[i]
+                val live = model.live(i)
                 // Boarding
                 TimelineRow(
                     above = prev?.let(::railOf),
@@ -441,7 +478,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
                     leg.from.track?.let { Text("Platform $it", style = MaterialTheme.typography.bodySmall, color = x.subtle) }
                     model.tightTransferInto(leg)?.let { TransferWarning(it, Modifier.padding(top = 4.dp)) }
                 }
-                TransitSegment(model, leg, rail, live, now)
+                TransitSegment(model, i, leg, rail, live, now)
                 // Alighting
                 val next = legs.getOrNull(i + 1)
                 TimelineRow(
@@ -513,11 +550,15 @@ private fun WalkSegment(leg: Leg, rail: RailSpec) {
 }
 
 @Composable
-private fun TransitSegment(model: RouteDetailModel, leg: Leg, rail: RailSpec, live: LiveCall?, now: Instant) {
+private fun TransitSegment(model: RouteDetailModel, index: Int, leg: Leg, rail: RailSpec, live: LiveCall?, now: Instant) {
     val x = LocalExtra.current
     var open by remember { mutableStateOf(false) }
     TimelineRow(rail, rail, Node.NONE, Color.Transparent) {
         Spacer(Modifier.height(6.dp))
+        if (leg.combined) {
+            LineOptions(leg, now, model.rideLive) { model.choose(index, it) }
+            Spacer(Modifier.height(8.dp))
+        }
         Row(
             Modifier.clip(RoundedCornerShape(10.dp)).clickable { model.openTrip(leg) }.padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -560,6 +601,64 @@ private fun TransitSegment(model: RouteDetailModel, leg: Leg, rail: RailSpec, li
                         Text(s.name, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Every line that makes this ride, soonest first, each with its departure and arrival
+ * (live when tracked). Tapping one rides it: the timeline and map follow the pick.
+ */
+@Composable
+private fun LineOptions(leg: Leg, now: Instant, rideLive: Map<String, LiveCall>, onChoose: (Leg) -> Unit) {
+    val x = LocalExtra.current
+    val options = leg.options.map { it to rideLive[it.rideKey] }
+        .sortedBy { (o, c) -> c?.takeIf { it.status == LiveStatus.LIVE }?.best ?: o.start }
+    Text("${options.size} lines ride this way · tap to choose", style = MaterialTheme.typography.labelMedium, color = x.subtle)
+    Spacer(Modifier.height(6.dp))
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+            .testTag("line_options"),
+    ) {
+        options.forEach { (o, c) ->
+            val chosen = o.rideKey == leg.rideKey
+            val isLive = c?.status == LiveStatus.LIVE
+            val dep = c?.takeIf { isLive }?.expected ?: o.start
+            val arr = c?.takeIf { isLive }?.alightExpected ?: o.end
+            val color = lineColor(o)
+            Row(
+                Modifier.fillMaxWidth().clickable { onChoose(o) }
+                    .background(if (chosen) color.copy(alpha = 0.14f) else Color.Transparent)
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = chosen, onClick = { onChoose(o) }, modifier = Modifier.size(32.dp))
+                LineBadge(o.lineLabel, o.mode, color = color, showIcon = false)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "${Fmt.time(dep)} → ${Fmt.time(arr)}",
+                        style = MaterialTheme.typography.bodyMedium.merge(Numeric),
+                        fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                    Text(
+                        o.headsign?.let { "to $it" } ?: modeName(o.mode),
+                        style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
+                when (c?.status) {
+                    LiveStatus.LIVE -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        val f = c.freshness(now)
+                        LiveSignal(f)
+                        Spacer(Modifier.width(4.dp))
+                        Text(Fmt.relative(dep, now), style = MaterialTheme.typography.labelLarge.merge(Numeric), color = freshnessColor(f))
+                    }
+                    LiveStatus.PASSED -> Text("Passed", style = MaterialTheme.typography.labelMedium, color = x.late)
+                    else -> Text(Fmt.relative(dep, now), style = MaterialTheme.typography.labelLarge.merge(Numeric), color = x.subtle)
+                }
+                Spacer(Modifier.width(6.dp))
             }
         }
     }

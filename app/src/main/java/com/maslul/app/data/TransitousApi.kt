@@ -28,13 +28,16 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
         val minTransferMinutes: Int = 2,
         val additionalTransferMinutes: Int = 1,
         val numItineraries: Int = 8,
+        /** Route from/to these stops exactly instead of the coordinates. */
+        val fromStopId: String? = null,
+        val toStopId: String? = null,
     )
 
     suspend fun plan(req: PlanRequest): PlanResult {
         val url = base.toHttpUrl().newBuilder()
             .addPathSegments("api/v6/plan")
-            .addQueryParameter("fromPlace", "${req.from.lat},${req.from.lon}")
-            .addQueryParameter("toPlace", "${req.to.lat},${req.to.lon}")
+            .addQueryParameter("fromPlace", req.fromStopId ?: "${req.from.lat},${req.from.lon}")
+            .addQueryParameter("toPlace", req.toStopId ?: "${req.to.lat},${req.to.lon}")
             .addQueryParameter("numItineraries", req.numItineraries.toString())
             .addQueryParameter("minTransferTime", req.minTransferMinutes.toString())
             .addQueryParameter("additionalTransferTime", req.additionalTransferMinutes.toString())

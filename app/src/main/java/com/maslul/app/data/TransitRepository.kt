@@ -12,7 +12,12 @@ data class LineDetail(
     val shape: List<GeoPoint>,
     val rides: List<Ride>,
     val timeline: TripTimeline,
+    /** Transitous stop id of the first stop, to look up trips departing from it. */
+    val firstStopId: String? = null,
 )
+
+/** Neither the line's own day nor recent days have stop data for it. */
+class LineUnavailableException : IllegalStateException("No stop data for this line right now. Please try again later.")
 
 /** A live vehicle on a line, with its estimated progress along the line's stops. */
 data class LineVehicle(val vehicle: Vehicle, val progress: TripTimeline.Progress, val ride: Ride?)
@@ -196,16 +201,97 @@ class TransitRepository(
 
     suspend fun lineDetail(route: LineRoute): LineDetail {
         val date = LocalDate.parse(route.date)
-        val ride = stride.rides(route.gtfsRouteId).firstOrNull() ?: error("No trips for this line today")
-        val stops = stride.rideStops(ride.id, date)
-        if (stops.isEmpty()) error("No stops found for this line")
-        val rides = runCatching { stride.departures(route.gtfsRouteId, stops.first().gtfsStopId, date) }.getOrDefault(emptyList())
+        val (stops, sameDay) = patternStops(route, date) ?: throw LineUnavailableException()
+        val (strideRides, firstStopId) = coroutineScope {
+            val first = async { transitStop(stops.first())?.stopId }
+            // Stride's per-day stop ids only match when the stops came from the route's own day.
+            val rides = if (sameDay) {
+                runCatching { stride.departures(route.gtfsRouteId, stops.first().gtfsStopId, date) }.getOrDefault(emptyList())
+            } else emptyList()
+            rides to first.await()
+        }
+        val rides = strideRides.ifEmpty {
+            runCatching { transitousRides(route, stops, firstStopId, date) }.getOrNull().orEmpty()
+        }
         // Prefer a daytime ride; any ride of the pattern shares the shape.
         val shape = rides.sortedBy { if (it.departure.atZone(IsraelZone).hour < 5) 1 else 0 }.take(2)
-            .firstNotNullOfOrNull { r -> trip(TripIds.fromJourney(r.journeyRef, r.departure, date))?.geometry?.takeIf { it.size >= 2 } }
+            .firstNotNullOfOrNull { r -> trip(rideTripId(route, stops, firstStopId, r))?.geometry?.takeIf { it.size >= 2 } }
             .orEmpty()
-        return LineDetail(route, stops, shape, rides, TripTimeline.fromLineStops(stops, shape))
+        return LineDetail(route, stops, shape, rides, TripTimeline.fromLineStops(stops, shape), firstStopId)
     }
+
+    /** Transitous trip id of one of [detail]'s rides, e.g. to open it on the trip screen. */
+    suspend fun rideTripId(detail: LineDetail, ride: Ride): String =
+        rideTripId(detail.route, detail.stops, detail.firstStopId, ride)
+
+    /**
+     * Stride and Transitous load different daily GTFS feeds, whose trip ids share the trip
+     * number but not the feed-date suffix ("279000_270926" vs "279000_280926"), so a Stride
+     * ride is looked up by trip number among the departures from its first stops.
+     */
+    private suspend fun rideTripId(route: LineRoute, stops: List<LineStop>, firstStopId: String?, ride: Ride): String {
+        ride.tripId?.let { return it }
+        for (i in 0..minOf(1, stops.lastIndex)) {
+            val stopId = transitStopId(stops, i, firstStopId) ?: continue
+            val at = ride.departure.plusSeconds(stops[i].offsetSec)
+            val deps = runCatching { transitous.stopTimes(stopId, time = at.minusSeconds(60), count = 20, language = language) }
+                .getOrNull().orEmpty()
+            matchTripId(deps, ride, route.lineRef, stops[i].offsetSec)?.let { return it }
+        }
+        return TripIds.fromJourney(ride.journeyRef, ride.departure, LocalDate.parse(route.date))
+    }
+
+    /**
+     * Transitous stop id of stop [i]. Transitous lists no departures at a terminus where
+     * boarding isn't allowed (an "operational stop"), so callers also try the second stop.
+     */
+    private suspend fun transitStopId(stops: List<LineStop>, i: Int, firstStopId: String?): String? =
+        if (i == 0) firstStopId else transitStop(stops[i])?.stopId
+
+    /**
+     * The route's ordered stops, and whether they came from [date] itself. Stride lists a day's
+     * rides before it has loaded their stops (for some routes, for hours), so when the day has
+     * none yet, fall back to the most recent earlier day of the same line ref (same pattern).
+     */
+    private suspend fun patternStops(route: LineRoute, date: LocalDate): Pair<List<LineStop>, Boolean>? {
+        rideStopsOf(route.gtfsRouteId, date)?.let { return it to true }
+        for (back in 1L..PATTERN_LOOKBACK_DAYS) {
+            val day = date.minusDays(back)
+            val stops = runCatching {
+                stride.routesByLineRef(listOf(route.lineRef), day).firstOrNull()?.let { rideStopsOf(it.gtfsRouteId, day) }
+            }.getOrNull()
+            if (stops != null) return stops to false
+        }
+        return null
+    }
+
+    /** Stops of the first ride of [gtfsRouteId] that has any, or null. */
+    private suspend fun rideStopsOf(gtfsRouteId: Long, date: LocalDate): List<LineStop>? {
+        for (ride in stride.rides(gtfsRouteId).take(3)) {
+            val stops = stride.rideStops(ride.id, date)
+            if (stops.size >= 2) return stops
+            // Stops are loaded per day, not per ride: one empty ride means the rest are empty too.
+            if (stops.isEmpty()) return null
+        }
+        return null
+    }
+
+    /** The day's departures of [route] from its first stop, from Transitous, when Stride has none. */
+    private suspend fun transitousRides(route: LineRoute, stops: List<LineStop>, firstStopId: String?, date: LocalDate): List<Ride> {
+        val dayStart = date.atStartOfDay(IsraelZone).toInstant()
+        for (i in 0..minOf(1, stops.lastIndex)) {
+            val stopId = transitStopId(stops, i, firstStopId) ?: continue
+            val deps = transitous.stopTimes(stopId, time = dayStart, count = 500, language = language)
+            val rides = ridesFromDepartures(deps, route.lineRef, dayStart, stops[i].offsetSec)
+            if (rides.isNotEmpty()) return rides
+        }
+        return emptyList()
+    }
+
+    /** Transitous stop for a Stride stop: Stride knows stop codes, Transitous needs the GTFS stop_id. */
+    suspend fun transitStop(s: LineStop): Place? =
+        runCatching { transitous.nearbyStops(GeoPoint(s.lat, s.lon), 0.0015) }.getOrDefault(emptyList())
+            .firstOrNull { it.subtitle?.startsWith("#${s.code}") == true }
 
     suspend fun lineVehicles(detail: LineDetail, now: Instant = Instant.now()): List<LineVehicle> {
         val vehicles = live.vehiclesForLine(detail.route.lineRef.toString())
@@ -238,6 +324,32 @@ class TransitRepository(
     }
 
     companion object {
+        private const val PATTERN_LOOKBACK_DAYS = 7L
+
+        /**
+         * Departures of line [lineRef] during the service day starting at [dayStart], as rides.
+         * [offsetSec] is the stop's scheduled offset from the first stop, where rides depart.
+         */
+        fun ridesFromDepartures(deps: List<Departure>, lineRef: Long, dayStart: Instant, offsetSec: Long = 0): List<Ride> {
+            val end = dayStart.plusSeconds(30 * 3600L)
+            return deps
+                .filter { TripIds.lineRef(it.routeId) == lineRef.toString() }
+                .mapNotNull { d -> TripIds.parse(d.tripId)?.let { Ride(it.gtfsTripId, d.scheduled.minusSeconds(offsetSec), d.tripId) } }
+                .filter { !it.departure.isBefore(dayStart) && it.departure.isBefore(end) }
+                .distinctBy { it.journeyRef }
+                .sortedBy { it.departure }
+        }
+
+        /**
+         * Transitous trip id of [ride] among departures from a stop [offsetSec] into the line:
+         * same trip number, else same line at the same time.
+         */
+        fun matchTripId(deps: List<Departure>, ride: Ride, lineRef: Long, offsetSec: Long = 0): String? {
+            val at = ride.departure.plusSeconds(offsetSec)
+            return deps.firstOrNull { TripIds.parse(it.tripId)?.tripNumber == ride.tripNumber }?.tripId
+                ?: deps.firstOrNull { TripIds.lineRef(it.routeId) == lineRef.toString() && it.scheduled == at }?.tripId
+        }
+
         fun indexOfStop(calls: List<StopCall>, target: StopCall, from: Int = 0): Int? {
             for (i in from until calls.size) if (target.stopId != null && calls[i].stopId == target.stopId) return i
             // Fall back to the geographically closest stop.

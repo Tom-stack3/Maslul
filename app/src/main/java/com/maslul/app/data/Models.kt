@@ -178,7 +178,8 @@ data class LineStop(
     val offsetSec: Long,
 )
 
-data class Ride(val journeyRef: String, val departure: Instant) {
+/** A scheduled trip of a line. [tripId] is its Transitous trip id, when already known. */
+data class Ride(val journeyRef: String, val departure: Instant, val tripId: String? = null) {
     val tripNumber get() = journeyRef.substringBefore('_')
 }
 

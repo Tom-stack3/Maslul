@@ -69,6 +69,8 @@ import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
 import com.maslul.app.ui.components.Fmt
 import com.maslul.app.ui.components.LineBadge
+import com.maslul.app.ui.components.lineColor
+import com.maslul.app.ui.components.readableAccent
 import com.maslul.app.ui.components.LiveDot
 import com.maslul.app.ui.components.LoadingBox
 import com.maslul.app.ui.components.MapLine
@@ -86,7 +88,6 @@ import com.maslul.app.ui.components.delayColor
 import com.maslul.app.ui.components.delayText
 import com.maslul.app.ui.components.modeIcon
 import com.maslul.app.ui.theme.LocalExtra
-import com.maslul.app.ui.theme.ModeColors
 import com.maslul.app.ui.theme.Numeric
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -176,7 +177,7 @@ fun LineScreen(model: LineModel) {
     LaunchedEffect(Unit) { model.liveLoop() }
     LaunchedEffect(Unit) { while (true) { delay(10_000); now = Instant.now() } }
     val r = model.route
-    val color = ModeColors.of(r.mode)
+    val color = lineColor(r)
     var menu by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -184,7 +185,7 @@ fun LineScreen(model: LineModel) {
             Column(Modifier.statusBarsPadding()) {
                 Row(Modifier.padding(start = 4.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
-                    LineBadge(r.label, r.mode, large = true)
+                    LineBadge(r.label, r.mode, color = color, large = true)
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text("to ${r.destination.ifBlank { r.longName }}", style = MaterialTheme.typography.titleSmall,
@@ -328,9 +329,10 @@ private fun VehicleRow(v: LineVehicle, rail: RailSpec, color: Color, label: Stri
                 Modifier.clip(RoundedCornerShape(10.dp)).background(color.copy(alpha = 0.12f)).padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(modeIcon(mode), null, tint = color, modifier = Modifier.size(16.dp))
+                val accent = readableAccent(color)
+                Icon(modeIcon(mode), null, tint = accent, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
-                Text(label, style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.Bold)
+                Text(label, style = MaterialTheme.typography.labelMedium, color = accent, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.width(8.dp))
             Pill(delayText(v.progress.delaySec), c)

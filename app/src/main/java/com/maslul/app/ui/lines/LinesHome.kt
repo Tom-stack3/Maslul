@@ -256,7 +256,7 @@ private fun NearbyLineRow(l: NearbyLine, now: Instant, onClick: () -> Unit) {
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.widthIn(min = 64.dp)) { LineBadge(d.lineLabel, d.mode, color = lineColor(d.mode, d.routeColor)) }
+        Box(Modifier.widthIn(min = 64.dp)) { LineBadge(d.lineLabel, d.mode, color = lineColor(d)) }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text("to ${d.headsign}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface,
@@ -281,7 +281,7 @@ fun LineRow(r: LineRoute, variants: Int = 1, favorite: Boolean = false, onClick:
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.widthIn(min = 64.dp)) { LineBadge(r.label, r.mode) }
+        Box(Modifier.widthIn(min = 64.dp)) { LineBadge(r.label, r.mode, color = lineColor(r)) }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             if (r.destination.isNotBlank()) {

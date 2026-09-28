@@ -524,7 +524,7 @@ fun ItineraryCard(
                             Text("${(leg.durationSec + 30) / 60}", style = MaterialTheme.typography.labelMedium, color = x.subtle)
                         }
                     } else {
-                        LineBadge(leg.lineLabel, leg.mode, color = lineColor(leg.mode, leg.routeColor))
+                        LineBadge(leg.lineLabel, leg.mode, color = lineColor(leg))
                     }
                     if (i < shown.lastIndex) {
                         Icon(Icons.Rounded.ChevronRight, null, tint = x.subtle.copy(alpha = 0.6f), modifier = Modifier.size(16.dp))

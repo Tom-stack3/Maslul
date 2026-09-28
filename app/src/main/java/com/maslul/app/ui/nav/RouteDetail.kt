@@ -297,13 +297,13 @@ private fun RouteMap(model: RouteDetailModel, modifier: Modifier, padding: Paddi
         itin.legs.map { l ->
             val pts = l.geometry.ifEmpty { listOf(l.from.point, l.to.point) }
             if (l.mode == TransitMode.WALK) MapLine(pts, if (x.isDark) Color(0xFFB0B8C4) else Color(0xFF5B6472), 5f, dashed = true)
-            else MapLine(pts, lineColor(l.mode, l.routeColor), 6f)
+            else MapLine(pts, lineColor(l), 6f)
         }
     }
     val markers = remember(itin) {
         buildList {
             itin.legs.filter { it.mode.isTransit }.forEach { l ->
-                val c = lineColor(l.mode, l.routeColor)
+                val c = lineColor(l)
                 l.intermediateStops.forEach { add(MapMarker(it.point, c, MarkerKind.STOP_SMALL)) }
                 add(MapMarker(l.from.point, c, MarkerKind.STOP))
                 add(MapMarker(l.to.point, c, MarkerKind.STOP))
@@ -315,13 +315,13 @@ private fun RouteMap(model: RouteDetailModel, modifier: Modifier, padding: Paddi
     val vehicles = model.live.entries.mapNotNull { (i, c) ->
         val v = c.vehicle ?: return@mapNotNull null
         val leg = itin.legs[i]
-        MapVehicle("v$i", v.point, v.bearing, lineColor(leg.mode, leg.routeColor), leg.lineLabel)
+        MapVehicle("v$i", v.point, v.bearing, lineColor(leg), leg.lineLabel)
     }
     // The live vehicle's way to the boarding stop, faded so it reads as "not your ride yet".
     val bg = MaterialTheme.colorScheme.background
     val approach = model.approach.entries.map { (i, a) ->
         val leg = itin.legs[i]
-        val c = lerp(lineColor(leg.mode, leg.routeColor), bg, 0.45f)
+        val c = lerp(lineColor(leg), bg, 0.45f)
         MapLine(a.path, c, 5f, dashed = true) to a.stops.map { MapMarker(it, c, MarkerKind.STOP_SMALL) }
     }
     val route = remember(itin) { itin.legs.flatMap { it.geometry.ifEmpty { listOf(it.from.point, it.to.point) } } }
@@ -381,7 +381,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
     val x = LocalExtra.current
     val legs = model.itinerary.legs
     val walkRail = RailSpec(Rail.DOTTED, x.walk)
-    fun railOf(l: Leg) = if (l.mode == TransitMode.WALK) walkRail else RailSpec(Rail.SOLID, lineColor(l.mode, l.routeColor))
+    fun railOf(l: Leg) = if (l.mode == TransitMode.WALK) walkRail else RailSpec(Rail.SOLID, lineColor(l))
     val onSurface = MaterialTheme.colorScheme.onSurface
 
     Column {
@@ -400,7 +400,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
                     TimelineRow(walkRail, walkRail, Node.SMALL, x.walk) { Text(leg.to.name, style = MaterialTheme.typography.bodyMedium) }
                 }
             } else {
-                val c = lineColor(leg.mode, leg.routeColor)
+                val c = lineColor(leg)
                 val rail = RailSpec(Rail.SOLID, c)
                 val prev = legs.getOrNull(i - 1)
                 val live = model.live[i]
@@ -496,7 +496,7 @@ private fun TransitSegment(model: RouteDetailModel, leg: Leg, rail: RailSpec, li
             Modifier.clip(RoundedCornerShape(10.dp)).clickable { model.openTrip(leg) }.padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            LineBadge(leg.lineLabel, leg.mode, color = lineColor(leg.mode, leg.routeColor))
+            LineBadge(leg.lineLabel, leg.mode, color = lineColor(leg))
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Text(leg.headsign?.let { "to $it" } ?: modeName(leg.mode), style = MaterialTheme.typography.bodyMedium,

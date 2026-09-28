@@ -56,6 +56,7 @@ import com.maslul.app.ui.components.TransitMap
 import com.maslul.app.ui.components.delayColor
 import com.maslul.app.ui.components.delayText
 import com.maslul.app.ui.components.lineColor
+import com.maslul.app.ui.components.readableAccent
 import com.maslul.app.ui.theme.LocalExtra
 import com.maslul.app.ui.theme.Numeric
 import kotlinx.coroutines.delay
@@ -99,7 +100,7 @@ fun TripScreen(model: TripModel) {
             Row(Modifier.statusBarsPadding().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
                 if (trip != null) {
-                    LineBadge(trip.lineLabel, trip.mode, color = lineColor(trip.mode, trip.routeColor), large = true)
+                    LineBadge(trip.lineLabel, trip.mode, color = lineColor(trip), large = true)
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(trip.headsign?.let { "to $it" } ?: "", style = MaterialTheme.typography.titleSmall, maxLines = 1,
@@ -120,7 +121,7 @@ fun TripScreen(model: TripModel) {
 @Composable
 private fun TripBody(model: TripModel, trip: Leg, now: Instant) {
     val x = LocalExtra.current
-    val color = lineColor(trip.mode, trip.routeColor)
+    val color = lineColor(trip)
     val calls = remember(trip) { listOf(trip.from) + trip.intermediateStops + trip.to }
     val p = model.progress
     val board = calls.indexOfFirst { it.stopId != null && it.stopId == model.boardStopId }
@@ -207,7 +208,7 @@ private fun TripBody(model: TripModel, trip: Leg, now: Instant) {
                 }
                 if (p != null && i == p.lastPassed && i < calls.lastIndex) {
                     TimelineRow(rail, rail, Node.VEHICLE, color, nodeY = 16.dp) {
-                        Text("${trip.lineLabel} is here", style = MaterialTheme.typography.labelMedium, color = color,
+                        Text("${trip.lineLabel} is here", style = MaterialTheme.typography.labelMedium, color = readableAccent(color),
                             modifier = Modifier.padding(vertical = 6.dp))
                     }
                 }

@@ -219,6 +219,7 @@ class LegDto(
     val routeColor: String? = null,
     val routeTextColor: String? = null,
     val agencyName: String? = null,
+    val agencyId: String? = null,
     val tripId: String? = null,
     val routeShortName: String? = null,
     val routeLongName: String? = null,
@@ -252,6 +253,7 @@ class LegDto(
             steps = steps.filter { it.distance > 0 }.map { WalkStep(describeStep(it), it.distance) },
             alerts = alerts.map { listOf(it.headerText, it.descriptionText).filter(String::isNotBlank).joinToString(": ") }
                 .filter { it.isNotBlank() },
+            agencyId = agencyId,
         )
     }
 
@@ -356,6 +358,7 @@ class StopTimeDto(
     val routeShortName: String? = null,
     val displayName: String? = null,
     val agencyName: String? = null,
+    val agencyId: String? = null,
     val routeColor: String? = null,
     val cancelled: Boolean = false,
     val tripCancelled: Boolean = false,
@@ -377,6 +380,7 @@ class StopTimeDto(
             routeColor = TransitousApi.parseColor(routeColor),
             scheduled = time,
             stop = call,
+            agencyId = agencyId,
         )
     }
 }

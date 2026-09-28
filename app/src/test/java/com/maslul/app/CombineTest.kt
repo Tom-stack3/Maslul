@@ -3,6 +3,8 @@ package com.maslul.app
 import com.maslul.app.data.Combine
 import com.maslul.app.data.Itinerary
 import com.maslul.app.data.Leg
+import com.maslul.app.data.LiveCall
+import com.maslul.app.data.LiveStatus
 import com.maslul.app.data.StopCall
 import com.maslul.app.data.TransitMode
 import org.junit.Assert.assertEquals
@@ -104,29 +106,31 @@ class CombineTest {
             bus("16", "A", 0.0, "B", 5.0, 10, 30), // itself
             bus("92", "A", 0.0, "B", 5.0, 12, 34), // fits: 34 + 3 min walk ≤ 40
             bus("5", "A", 0.0, "B", 5.0, 14, 38), // misses the train
-            bus("92", "A", 0.0, "B", 5.0, 13, 35), // second run of 92: only the soonest is kept
-            bus("40", "A", 0.0, "B", 5.0, 2, 22), // leaves too early
+            bus("92", "A", 0.0, "B", 5.0, 13, 35), // second run of 92: kept, the next few of a line are offered
+            bus("40", "A", 0.0, "B", 5.0, 2, 22), // scheduled earlier: kept in case it's running late
+            bus("41", "A", 0.0, "B", 5.0, -30, -10), // far too early to be merely late
             bus("7", "Z", 3.0, "B", 5.0, 12, 30), // other stop
         )
         val leg = Combine.addAlternatives(a, 0, rides).legs[0]
-        assertEquals(listOf("16", "92"), leg.options.map { it.lineLabel })
-        assertEquals(at(12), leg.alternatives.single().start)
+        assertEquals(listOf("40", "16", "92", "92"), leg.options.map { it.lineLabel })
+        assertEquals(listOf(12, 13).map { at(it) }, leg.alternatives.filter { it.lineLabel == "92" }.map { it.start })
 
-        // A later ride's alternatives must leave after the previous one arrives.
-        val later = Combine.addAlternatives(
+        // A later ride's alternatives must leave after the previous one arrives (unless live says they're late).
+        val withTrains = Combine.addAlternatives(
             a, 2,
-            listOf(bus("Train2", "C", 5.1, "F", 50.0, 32, 60), bus("Train3", "C", 5.1, "F", 50.0, 36, 66)),
-        ).legs[2]
-        assertEquals(listOf("Train3", "Train"), later.options.map { it.lineLabel })
+            listOf(bus("Train2", "C", 5.1, "F", 50.0, 31, 60), bus("Train3", "C", 5.1, "F", 50.0, 36, 66)),
+        )
+        assertEquals(listOf("Train3", "Train"), Combine.catchableOptions(withTrains, 2, at(0)) { null }.map { it.lineLabel })
     }
 
     @Test
     fun firstRideAlternativesNotInThePast() {
         val a = direct("16", 10, 30)
         val rides = listOf(bus("92", "A", 0.2, "B", 5.0, 8, 29))
-        assertTrue(Combine.addAlternatives(a, 1, rides).legs[1].combined)
-        // Now is 07:07 and the walk to the stop takes 3 min: the 07:08 can't be caught.
-        assertFalse(Combine.addAlternatives(a, 1, rides, now = at(7)).legs[1].combined)
+        assertEquals(listOf("92", "16"), Combine.catchableOptions(Combine.addAlternatives(a, 1, rides), 1, at(0)) { null }.map { it.lineLabel })
+        // Now is 07:07 and the walk to the stop takes 3 min: the 07:08 can't be caught (without live data saying it's late).
+        val now = Combine.addAlternatives(a, 1, rides, now = at(7))
+        assertEquals(listOf("16"), Combine.catchableOptions(now, 1, at(7)) { null }.map { it.lineLabel })
     }
 
     @Test
@@ -141,5 +145,66 @@ class CombineTest {
         assertEquals(at(36), chosen.end)
         assertEquals(merged.id, chosen.id)
         assertSame(merged, Combine.choose(merged, 1, merged.legs[1]))
+    }
+
+    // ---- Catching an earlier bus that's running late ----
+
+    private fun liveAt(l: Leg, board: Int) =
+        LiveCall(LiveStatus.LIVE, l.start, at(board), delaySec = (board * 60L) - (l.start.epochSecond - t0.epochSecond))
+
+    /** Planned 16 at 10:12 (min 12); the 10:02 one (min 2) is running late and reaches the stop at min 8. */
+    private fun lateCase(): Triple<Itinerary, Leg, Leg> {
+        val planned = direct("16", 12, 30)
+        val late = bus("16", "A", 0.2, "B", 5.0, 2, 20)
+        return Triple(Combine.addAlternatives(planned, 1, listOf(late), now = at(4)), planned.legs[1], late)
+    }
+
+    @Test
+    fun keepsEarlierScheduledRideOfSameLineAsCandidate() {
+        val (itin, _, late) = lateCase()
+        assertEquals(listOf("trip-16-2", "trip-16-12"), itin.legs[1].options.map { it.tripId })
+        assertEquals(late.start, itin.legs[1].options.first().start)
+    }
+
+    @Test
+    fun switchesToLateEarlierBusThatComesFirst() {
+        val (itin, planned, late) = lateCase()
+        val live = mapOf(late.rideKey to liveAt(late, 8), planned.rideKey to liveAt(planned, 12))
+        // At min 4 with a 3-minute walk you're at the stop by 7 — the late bus comes at 8.
+        val picked = Combine.pickBest(itin, at(4), { live[it.rideKey] })
+        assertEquals("trip-16-2", picked.legs[1].tripId)
+        assertEquals(listOf("trip-16-12"), picked.legs[1].alternatives.map { it.tripId })
+    }
+
+    @Test
+    fun ignoresLateBusYouCannotReach() {
+        val (itin, planned, late) = lateCase()
+        val live = mapOf(late.rideKey to liveAt(late, 8), planned.rideKey to liveAt(planned, 12))
+        // At min 7 you'd reach the stop at 10: the late bus is gone by then.
+        assertSame(itin, Combine.pickBest(itin, at(7), { live[it.rideKey] }))
+        assertEquals(listOf("trip-16-12"), Combine.catchableOptions(itin, 1, at(7)) { live[it.rideKey] }.map { it.tripId })
+    }
+
+    @Test
+    fun earlierScheduledBusWithoutLiveDataIsNotOffered() {
+        val (itin, _, _) = lateCase()
+        // No live data: the 10:02 has presumably left, so only the planned bus is catchable.
+        assertEquals(listOf("trip-16-12"), Combine.catchableOptions(itin, 1, at(4)) { null }.map { it.tripId })
+        assertSame(itin, Combine.pickBest(itin, at(4), { null }))
+    }
+
+    @Test
+    fun passedBusIsNotOffered() {
+        val (itin, planned, late) = lateCase()
+        val live = mapOf(late.rideKey to LiveCall(LiveStatus.PASSED, late.start, null), planned.rideKey to liveAt(planned, 12))
+        assertEquals(listOf("trip-16-12"), Combine.catchableOptions(itin, 1, at(4)) { live[it.rideKey] }.map { it.tripId })
+    }
+
+    @Test
+    fun keepsUpToThreeBusesPerLine() {
+        val planned = direct("16", 12, 30)
+        val more = listOf(14, 18, 22, 26).map { bus("16", "A", 0.2, "B", 5.0, it, it + 18) }
+        val leg = Combine.addAlternatives(planned, 1, more, now = at(4)).legs[1]
+        assertEquals(listOf(12, 14, 18).map { at(it) }, leg.options.map { it.start })
     }
 }

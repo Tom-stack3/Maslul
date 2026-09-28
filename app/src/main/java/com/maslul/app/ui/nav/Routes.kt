@@ -264,18 +264,18 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
     suspend fun refreshLive() {
         val now = Instant.now()
         coroutineScope {
-            itineraries
-                .filter { it.firstTransit != null && it.firstTransit!!.start.isBefore(now.plusSeconds(90 * 60)) }
-                .map { it to async { runCatching { repo.legLive(it.firstTransit!!, now) }.getOrNull() } }
-                .forEach { (it, d) -> d.await()?.let { c -> live[it.id] = c } }
-            // Every line of a combined ride, so the card can show which comes first.
-            itineraries.flatMap { it.transitLegs.filter { l -> l.combined } }
-                .flatMap { it.alternatives + it.copy(alternatives = emptyList()) }
+            // Every bus of every ride (other lines, later ones, an earlier one running late),
+            // so each card can show — and take — whichever comes first.
+            itineraries.flatMap { it.transitLegs }
+                .flatMap { it.options }
                 .filter { it.start.isBefore(now.plusSeconds(90 * 60)) && it.end.isAfter(now) }
                 .distinctBy { it.rideKey }
                 .map { it to async { runCatching { repo.legLive(it, now) }.getOrNull() } }
                 .forEach { (l, d) -> d.await()?.let { c -> rideLive[l.rideKey] = c } }
         }
+        // Leaving now: ride the bus that gets there first rather than the timetable's pick.
+        if (timeMode == TimeMode.NOW) itineraries = itineraries.map { Combine.pickBest(it, now, { l -> rideLive[l.rideKey] }) }
+        itineraries.forEach { itin -> itin.firstTransit?.let { rideLive[it.rideKey] }?.let { live[itin.id] = it } }
     }
 
     suspend fun liveLoop() {
@@ -580,6 +580,11 @@ fun ItineraryCard(
                 LeaveIn(leaveAt, now, live.freshness(now))
             }
             Spacer(Modifier.height(12.dp))
+            val liveOf: (Leg) -> LiveCall? = { o -> if (o.rideKey == first?.rideKey) live else rideLive[o.rideKey] }
+            // Buses that can still be caught on each ride (other lines, the next ones, a late earlier one).
+            val choices = itin.legs.withIndex().filter { it.value.mode.isTransit }
+                .associate { (i, l) -> l.rideKey to Combine.catchableOptions(itin, i, now, liveOf).ifEmpty { listOf(l) } }
+            val lineCount = { l: Leg -> choices[l.rideKey].orEmpty().distinctBy { Combine.lineKey(it) }.size }
             FlowRow(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 itemVerticalAlignment = Alignment.CenterVertically,
@@ -591,8 +596,8 @@ fun ItineraryCard(
                             Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, null, tint = x.subtle, modifier = Modifier.size(18.dp))
                             Text("${(leg.durationSec + 30) / 60}", style = MaterialTheme.typography.labelMedium, color = x.subtle)
                         }
-                    } else if (leg.combined) {
-                        CombinedBadges(leg)
+                    } else if (lineCount(leg) > 1) {
+                        CombinedBadges(choices[leg.rideKey].orEmpty())
                     } else {
                         LineBadge(leg.lineLabel, leg.mode, color = lineColor(leg))
                     }
@@ -601,13 +606,17 @@ fun ItineraryCard(
                     }
                 }
             }
-            if (first != null && !first.combined) {
+            // The first ride lists its next buses when there's a choice; later rides only when several lines go.
+            val strips = itin.transitLegs.filter { l ->
+                if (l === first) choices[l.rideKey].orEmpty().size > 1 else lineCount(l) > 1
+            }
+            if (first != null && first !in strips) {
                 Spacer(Modifier.height(12.dp))
                 LiveLine(first.lineLabel, first.mode, first.from.name, live, first.start, now, onClick = onLiveClick)
             }
-            itin.transitLegs.filter { it.combined }.forEach { leg ->
+            strips.forEach { leg ->
                 Spacer(Modifier.height(if (leg === first) 12.dp else 8.dp))
-                RideOptions(leg, now, relative = leg === first) { o -> if (o.rideKey == first?.rideKey) live else rideLive[o.rideKey] }
+                RideOptions(leg, choices[leg.rideKey].orEmpty(), now, relative = leg === first, liveOf)
             }
             if (risk != null) {
                 Spacer(Modifier.height(8.dp))
@@ -627,9 +636,9 @@ fun ItineraryCard(
 
 /** "16 / 92 / 5": every line that makes a combined ride, soonest first. */
 @Composable
-fun CombinedBadges(leg: Leg) {
+fun CombinedBadges(rides: List<Leg>) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        leg.options.distinctBy { it.lineLabel }.forEachIndexed { i, o ->
+        rides.distinctBy { it.lineLabel }.forEachIndexed { i, o ->
             if (i > 0) Text(" / ", style = MaterialTheme.typography.labelMedium, color = LocalExtra.current.subtle)
             LineBadge(o.lineLabel, o.mode, color = lineColor(o), showIcon = i == 0)
         }
@@ -642,17 +651,16 @@ fun CombinedBadges(leg: Leg) {
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun RideOptions(leg: Leg, now: Instant, relative: Boolean, liveOf: (Leg) -> LiveCall?) {
+fun RideOptions(leg: Leg, rides: List<Leg>, now: Instant, relative: Boolean, liveOf: (Leg) -> LiveCall?) {
     val x = LocalExtra.current
-    val options = leg.options.map { it to liveOf(it) }
-        .filter { (_, c) -> c?.status != LiveStatus.PASSED }
-        .sortedBy { (o, c) -> c?.takeIf { it.status == LiveStatus.LIVE }?.best ?: o.start }
+    val options = rides.map { it to liveOf(it) }.sortedBy { (o, c) -> Combine.boards(o, c) }
+    val lines = options.distinctBy { Combine.lineKey(it.first) }.size
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 12.dp, vertical = 9.dp),
     ) {
         Text(
-            "${options.size} lines from ${leg.from.name}",
+            (if (lines > 1) "$lines lines" else "Next buses") + " from ${leg.from.name}",
             style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.height(6.dp))

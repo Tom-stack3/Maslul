@@ -90,13 +90,14 @@ class TransitRepository(
             to = leg.to.point,
             fromStopId = leg.from.stopId,
             toStopId = leg.to.stopId,
-            time = leg.start.minusSeconds(5 * 60),
+            // From well before the ride: an earlier bus running late may come first.
+            time = leg.start.minusSeconds(Combine.LATE_SEC),
             modes = modes,
             maxWalkMinutes = 3,
             maxTransfers = 0,
             minTransferMinutes = 0,
             additionalTransferMinutes = 0,
-            numItineraries = 12,
+            numItineraries = 24,
             language = language,
         )
         val rides = transitous.plan(req).itineraries

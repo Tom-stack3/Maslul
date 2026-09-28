@@ -135,8 +135,16 @@ class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: P
     /** A tight connection onto [leg], if the previous vehicle leaves little spare time. */
     fun tightTransferInto(leg: Leg) = transfers.firstOrNull { it.next === leg && it.tight }
 
-    /** Rides [option] (another line between the same stops) on leg [i] instead. */
+    /** Legs whose ride the user picked by hand; the others follow whichever bus gets there first. */
+    private val picked = HashSet<Int>()
+
+    /** Rides [option] (another bus between the same stops) on leg [i] instead. */
     fun choose(i: Int, option: Leg) {
+        picked += i
+        switchTo(i, option)
+    }
+
+    private fun switchTo(i: Int, option: Leg) {
         itinerary = Combine.choose(itinerary, i, option)
         transfers = Ranking.transfers(itinerary, store.data.value.settings.walkSpeed.mps)
         approach.remove(i)
@@ -161,10 +169,25 @@ class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: P
                         val call = runCatching { repo.legLive(leg, now) }.getOrNull() ?: return@launch
                         rideLive[leg.rideKey] = call
                         if (leg.rideKey == itinerary.legs.getOrNull(i)?.rideKey) updateApproach(i, leg, call)
+                        pickBest()
                     }
                 }
             }
             delay(20_000)
+        }
+    }
+
+    /**
+     * Takes whichever catchable bus gets you there first on each leg the user hasn't picked —
+     * e.g. an earlier 16 running late that comes before the planned one. Only for trips about
+     * to happen, where live data says something.
+     */
+    private fun pickBest() {
+        val now = Instant.now()
+        if (itinerary.start.isAfter(now.plusSeconds(90 * 60))) return
+        itinerary.legs.indices.forEach { i ->
+            if (i in picked) return@forEach
+            Combine.bestOption(itinerary, i, now) { rideLive[it.rideKey] }?.let { switchTo(i, it) }
         }
     }
 
@@ -547,8 +570,10 @@ private fun TransitSegment(model: RouteDetailModel, index: Int, leg: Leg, rail: 
     var open by remember { mutableStateOf(false) }
     TimelineRow(rail, rail, Node.NONE, Color.Transparent) {
         Spacer(Modifier.height(6.dp))
-        if (leg.combined) {
-            LineOptions(leg, now, model.rideLive) { model.choose(index, it) }
+        val options = Combine.catchableOptions(model.itinerary, index, now) { model.rideLive[it.rideKey] }
+            .let { o -> if (o.none { it.rideKey == leg.rideKey }) o + leg else o }
+        if (options.size > 1) {
+            LineOptions(leg, options, now, model.rideLive) { model.choose(index, it) }
             Spacer(Modifier.height(8.dp))
         }
         Row(
@@ -599,15 +624,19 @@ private fun TransitSegment(model: RouteDetailModel, index: Int, leg: Leg, rail: 
 }
 
 /**
- * Every line that makes this ride, soonest first, each with its departure and arrival
+ * Every bus that can still be caught for this ride (other lines, or the next ones of the same
+ * line — including an earlier one running late), soonest first, each with its departure and arrival
  * (live when tracked). Tapping one rides it: the timeline and map follow the pick.
  */
 @Composable
-private fun LineOptions(leg: Leg, now: Instant, rideLive: Map<String, LiveCall>, onChoose: (Leg) -> Unit) {
+private fun LineOptions(leg: Leg, rides: List<Leg>, now: Instant, rideLive: Map<String, LiveCall>, onChoose: (Leg) -> Unit) {
     val x = LocalExtra.current
-    val options = leg.options.map { it to rideLive[it.rideKey] }
-        .sortedBy { (o, c) -> c?.takeIf { it.status == LiveStatus.LIVE }?.best ?: o.start }
-    Text("${options.size} lines ride this way · tap to choose", style = MaterialTheme.typography.labelMedium, color = x.subtle)
+    val options = rides.map { it to rideLive[it.rideKey] }.sortedBy { (o, c) -> Combine.boards(o, c) }
+    val lines = options.distinctBy { Combine.lineKey(it.first) }.size
+    Text(
+        (if (lines > 1) "${options.size} buses ride this way" else "Next ${options.size} buses of ${leg.lineLabel}") + " · tap to choose",
+        style = MaterialTheme.typography.labelMedium, color = x.subtle,
+    )
     Spacer(Modifier.height(6.dp))
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)

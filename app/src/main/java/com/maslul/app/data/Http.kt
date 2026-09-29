@@ -1,5 +1,6 @@
 package com.maslul.app.data
 
+import com.maslul.app.BuildConfig
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
 import okhttp3.Call
@@ -24,7 +25,7 @@ class HttpException(val code: Int, message: String) : IOException(message)
 
 object Http {
     /** Community services ask clients to identify themselves. */
-    const val USER_AGENT = "Maslul/1.0 (personal Android transit app)"
+    val USER_AGENT = "Maslul/${BuildConfig.VERSION_NAME} (+https://github.com/Tom-stack3/Maslul)"
 
     val client: OkHttpClient by lazy {
         OkHttpClient.Builder()

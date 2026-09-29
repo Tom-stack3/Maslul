@@ -37,7 +37,7 @@ data class SavedTrip(val from: Place, val to: Place, val label: String? = null)
 
 /** Icon a user can pick for a favourite place. */
 @Serializable
-enum class FavoriteIcon { STAR, HEART, HOME, SCHOOL, GYM, SHOPPING, RESTAURANT, CAFE, HEALTH, PARK, SEA, SOCCER }
+enum class FavoriteIcon { STAR, HEART, HOME, SCHOOL, GYM, SHOPPING, RESTAURANT, CAFE, HEALTH, PARK, POOL, SPORTS }
 
 /** A saved place with a user-chosen label, e.g. "Gym" or "Mom". */
 @Serializable

@@ -1,5 +1,7 @@
 package com.maslul.app.ui.nav
 
+import com.maslul.app.R
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,9 +26,8 @@ import androidx.compose.material.icons.rounded.Park
 import androidx.compose.material.icons.rounded.Restaurant
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.ShoppingCart
-import androidx.compose.material.icons.rounded.SportsSoccer
 import androidx.compose.material.icons.rounded.Star
-import androidx.compose.material.icons.rounded.Waves
+import androidx.compose.material.icons.rounded.Pool
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -65,6 +66,7 @@ import com.maslul.app.ui.theme.LocalExtra
 
 val FavoriteGold = Color(0xFFF5A524)
 
+@Composable
 fun FavoriteIcon.vector(): ImageVector = when (this) {
     FavoriteIcon.STAR -> Icons.Rounded.Star
     FavoriteIcon.HEART -> Icons.Rounded.Favorite
@@ -76,8 +78,8 @@ fun FavoriteIcon.vector(): ImageVector = when (this) {
     FavoriteIcon.CAFE -> Icons.Rounded.LocalCafe
     FavoriteIcon.HEALTH -> Icons.Rounded.LocalHospital
     FavoriteIcon.PARK -> Icons.Rounded.Park
-    FavoriteIcon.SEA -> Icons.Rounded.Waves
-    FavoriteIcon.SOCCER -> Icons.Rounded.SportsSoccer
+    FavoriteIcon.POOL -> Icons.Rounded.Pool
+    FavoriteIcon.SPORTS -> ImageVector.vectorResource(R.drawable.ic_sports_and_outdoors)
 }
 
 /** A place being added to (or edited in) the favourites; drives [FavoriteDialog]. */

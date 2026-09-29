@@ -16,11 +16,14 @@ enum class WalkSpeed(val mps: Double, val label: String) {
     SLOW(1.0, "Relaxed"), NORMAL(1.3, "Normal"), FAST(1.6, "Brisk")
 }
 
+/** Longest walk to or from a stop that route planning allows by default. */
+const val DEFAULT_MAX_WALK_MINUTES = 20
+
 @Serializable
 data class Settings(
     val theme: ThemeMode = ThemeMode.SYSTEM,
     val walkSpeed: WalkSpeed = WalkSpeed.NORMAL,
-    val maxWalkMinutes: Int = 15,
+    val maxWalkMinutes: Int = DEFAULT_MAX_WALK_MINUTES,
     val modes: Set<TransitMode> = setOf(
         TransitMode.BUS, TransitMode.TRAIN, TransitMode.LIGHT_RAIL,
         TransitMode.METRO, TransitMode.CABLE_CAR, TransitMode.FERRY,
@@ -34,7 +37,7 @@ data class SavedTrip(val from: Place, val to: Place, val label: String? = null)
 
 /** Icon a user can pick for a favourite place. */
 @Serializable
-enum class FavoriteIcon { STAR, HEART, HOME, SCHOOL, GYM, SHOPPING, RESTAURANT, CAFE, HEALTH, PARK }
+enum class FavoriteIcon { STAR, HEART, HOME, SCHOOL, GYM, SHOPPING, RESTAURANT, CAFE, HEALTH, PARK, SEA, SOCCER }
 
 /** A saved place with a user-chosen label, e.g. "Gym" or "Mom". */
 @Serializable

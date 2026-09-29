@@ -85,6 +85,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.maslul.app.data.Combine
+import com.maslul.app.data.DEFAULT_MAX_WALK_MINUTES
 import com.maslul.app.data.GeoPoint
 import com.maslul.app.data.IsraelZone
 import com.maslul.app.data.Itinerary
@@ -381,7 +382,7 @@ fun RoutesScreen(model: RoutesModel) {
                             modifier = Modifier.testTag("time_chip"),
                         )
                         val s = data.settings
-                        val custom = s.modes.size < 6 || s.maxWalkMinutes != 15 || s.wheelchair || s.walkSpeed != WalkSpeed.NORMAL
+                        val custom = s.modes.size < 6 || s.maxWalkMinutes != DEFAULT_MAX_WALK_MINUTES || s.wheelchair || s.walkSpeed != WalkSpeed.NORMAL
                         FilterChip(
                             selected = custom,
                             onClick = { showOptions = true },

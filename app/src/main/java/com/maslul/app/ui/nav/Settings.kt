@@ -1,5 +1,10 @@
 package com.maslul.app.ui.nav
 
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.rounded.Code
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -43,6 +48,8 @@ import com.maslul.app.ui.ScreenModel
 import com.maslul.app.ui.components.PlaceRow
 import com.maslul.app.ui.components.SectionHeader
 import com.maslul.app.ui.theme.LocalExtra
+
+private const val SOURCE_URL = "https://github.com/Tom-stack3/Maslul"
 
 class SettingsModel(nav: AppNav) : ScreenModel(nav) {
     var favoriteDraft by mutableStateOf<FavoriteDraft?>(null)
@@ -126,7 +133,7 @@ fun SettingsScreen(model: SettingsModel) {
 
             SectionHeader("About")
             Text(
-                "Maslul is a personal, free transit app for Israel.\n\n" +
+                "Maslul is a free, open-source transit app for Israel, licensed under the GNU AGPL v3.\n\n" +
                     "• Routes & timetables: Israel Ministry of Transport GTFS, routed by Transitous (transitous.org).\n" +
                     "• Live vehicles: Ministry of Transport SIRI feed, published by Open Bus / The Public Knowledge Workshop (Hasadna).\n" +
                     "• Line search & daily schedules: Open Bus Stride API.\n" +
@@ -137,6 +144,12 @@ fun SettingsScreen(model: SettingsModel) {
                 color = LocalExtra.current.subtle,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
             )
+            val uri = LocalUriHandler.current
+            TextButton(onClick = { uri.openUri(SOURCE_URL) }, modifier = Modifier.padding(horizontal = 8.dp)) {
+                Icon(Icons.Rounded.Code, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Source code on GitHub")
+            }
             Spacer(Modifier.height(24.dp))
         }
     }

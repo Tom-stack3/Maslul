@@ -66,8 +66,14 @@ data class StopCall(
     val scheduledArrival: Instant?,
     val scheduledDeparture: Instant?,
     val track: String? = null,
+    /** Floor within a multi-level station (e.g. Tel Aviv Central), when given. */
+    val floor: String? = null,
 ) {
     val point get() = GeoPoint(lat, lon)
+    /** "Platform 13", "Platform 5, floor 6" — where to stand at a big station. */
+    val platformLabel: String?
+        get() = listOfNotNull(track?.let { "Platform $it" }, floor?.let { if (track != null) "floor $it" else "Floor $it" })
+            .joinToString(", ").ifEmpty { null }
     val scheduledTime: Instant? get() = scheduledDeparture ?: scheduledArrival
 }
 

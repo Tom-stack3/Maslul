@@ -28,6 +28,8 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
         val minTransferMinutes: Int = 2,
         val additionalTransferMinutes: Int = 1,
         val numItineraries: Int = 8,
+        /** How far past [time] to look, in seconds (MOTIS default: 2 h). */
+        val searchWindowSec: Int? = null,
         /** Route from/to these stops exactly instead of the coordinates. */
         val fromStopId: String? = null,
         val toStopId: String? = null,
@@ -39,6 +41,7 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
             .addQueryParameter("fromPlace", req.fromStopId ?: "${req.from.lat},${req.from.lon}")
             .addQueryParameter("toPlace", req.toStopId ?: "${req.to.lat},${req.to.lon}")
             .addQueryParameter("numItineraries", req.numItineraries.toString())
+            .apply { req.searchWindowSec?.let { addQueryParameter("searchWindow", it.toString()) } }
             .addQueryParameter("minTransferTime", req.minTransferMinutes.toString())
             .addQueryParameter("additionalTransferTime", req.additionalTransferMinutes.toString())
             .addQueryParameter("arriveBy", req.arriveBy.toString())
@@ -119,13 +122,15 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
     }
 
     /** Upcoming departures at a stop. */
-    suspend fun stopTimes(stopId: String, time: Instant? = null, count: Int = 30, language: String? = null): List<Departure> {
+    /** Departures from [stopId]: at least [count], and all of those within [windowSec] of [time] when given. */
+    suspend fun stopTimes(stopId: String, time: Instant? = null, count: Int = 30, language: String? = null, windowSec: Long? = null): List<Departure> {
         val url = base.toHttpUrl().newBuilder()
             .addPathSegments("api/v6/stoptimes")
             .addQueryParameter("stopId", stopId)
             .addQueryParameter("n", count.toString())
             .apply {
                 time?.let { addQueryParameter("time", queryTime(it)) }
+                windowSec?.let { addQueryParameter("window", it.toString()) }
                 language?.let { addQueryParameter("language", it) }
             }
             .build()
@@ -133,6 +138,17 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
     }
 
     companion object {
+        // Israel's GTFS has no platform_code; the platform and floor sit in stop_desc instead:
+        // "רחוב: יהושע חנקין עיר: באר שבע רציף: 13  קומה: " (empty when the stop has none).
+        private val PLATFORM = Regex("""רציף:\s*([^\s:]+)(?=\s|$)""")
+        private val FLOOR = Regex("""קומה:\s*([^\s:]+)(?=\s|$)""")
+
+        fun platformOf(description: String?): String? = description?.let { PLATFORM.find(it)?.groupValues?.get(1) }
+
+        /** Floor of a multi-level station; ground level ("0") isn't worth mentioning. */
+        fun floorOf(description: String?): String? =
+            description?.let { FLOOR.find(it)?.groupValues?.get(1) }?.takeIf { it != "0" }
+
         /**
          * MOTIS silently ignores a `time` with fractional seconds and answers from the start of
          * the service day instead, so always send whole seconds.
@@ -197,7 +213,8 @@ class PlaceDto(
         lon = lon,
         scheduledArrival = TransitousApi.instant(scheduledArrival ?: arrival),
         scheduledDeparture = TransitousApi.instant(scheduledDeparture ?: departure),
-        track = track ?: scheduledTrack,
+        track = track ?: scheduledTrack ?: TransitousApi.platformOf(description),
+        floor = TransitousApi.floorOf(description),
     )
 }
 

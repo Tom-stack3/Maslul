@@ -98,6 +98,8 @@ class TransitRepository(
             minTransferMinutes = 0,
             additionalTransferMinutes = 0,
             numItineraries = 24,
+            // Cover every ride from the late window up to the latest alternative.
+            searchWindowSec = (Combine.LATE_SEC + Combine.WINDOW_SEC + 10 * 60).toInt(),
             language = language,
         )
         val rides = transitous.plan(req).itineraries
@@ -157,7 +159,8 @@ class TransitRepository(
         // already passed would be missing entirely; fetch the recent past too.
         val upcoming = async { transitous.stopTimes(stopId, count = 40, language = language) }
         val recent = async {
-            runCatching { transitous.stopTimes(stopId, now.minusSeconds(LATE_WINDOW_SEC), count = 40, language = language) }
+            // The whole window, however busy the stop: a count alone can end well short of now.
+            runCatching { transitous.stopTimes(stopId, now.minusSeconds(LATE_WINDOW_SEC), count = 10, language = language, windowSec = LATE_WINDOW_SEC) }
                 .getOrDefault(emptyList())
         }
         val deps = mergeDepartures(upcoming.await(), recent.await(), now)
@@ -372,7 +375,7 @@ class TransitRepository(
 
     companion object {
         /** How far back to look for late trips whose scheduled time at a stop already passed. */
-        const val LATE_WINDOW_SEC = 30 * 60L
+        const val LATE_WINDOW_SEC = 90 * 60L
 
         /** Upcoming stop times plus recently-scheduled ones (possibly running late), without duplicates. */
         fun mergeDepartures(upcoming: List<Departure>, recent: List<Departure>, now: Instant): List<Departure> {

@@ -90,6 +90,7 @@ fun PickOnMapScreen(model: PickOnMapModel) {
             initialZoom = 16.0,
             controller = controller,
             onCameraIdle = model::onIdle,
+            compassModifier = Modifier.statusBarsPadding().padding(16.dp),
         )
         Icon(
             Icons.Rounded.Place,

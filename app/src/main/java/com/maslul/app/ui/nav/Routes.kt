@@ -612,7 +612,7 @@ fun ItineraryCard(
             }
             if (first != null && first !in strips) {
                 Spacer(Modifier.height(12.dp))
-                LiveLine(first.lineLabel, first.mode, first.from.name, live, first.start, now, onClick = onLiveClick)
+                LiveLine(first.lineLabel, first.mode, listOfNotNull(first.from.name, first.from.platformLabel).joinToString(" · "), live, first.start, now, onClick = onLiveClick)
             }
             strips.forEach { leg ->
                 Spacer(Modifier.height(if (leg === first) 12.dp else 8.dp))

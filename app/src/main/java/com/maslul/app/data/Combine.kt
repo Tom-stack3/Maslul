@@ -20,7 +20,7 @@ object Combine {
     /** Buses of one line offered per ride (the next few, including a late earlier one). */
     const val PER_LINE = 3
     /** Earlier-scheduled rides are kept as candidates this far back: they may be running late. */
-    const val LATE_SEC = 30 * 60L
+    const val LATE_SEC = TransitRepository.LATE_WINDOW_SEC
     /** Leeway when judging whether a bus can still be caught. */
     private const val CATCH_SLACK_SEC = 90L
 

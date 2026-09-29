@@ -157,6 +157,8 @@ private fun TripBody(model: TripModel, trip: Leg, now: Instant) {
             contentPadding = PaddingValues(top = if (following) 56.dp else 0.dp),
             focusVehicleId = VEHICLE_ID.takeIf { following },
             onUserPan = { model.following = false },
+            compassAlignment = Alignment.BottomEnd,
+            compassModifier = Modifier.padding(8.dp),
         )
         if (following) {
             LiveLocationCard(
@@ -239,7 +241,7 @@ private fun TripBody(model: TripModel, trip: Leg, now: Instant) {
                         listOfNotNull(
                             when (i) { board -> "Board here"; alight -> "Get off here"; else -> null },
                             c.code?.let { "#$it" },
-                            c.track?.let { "Platform $it" },
+                            c.platformLabel,
                         ).joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (highlight) MaterialTheme.colorScheme.primary else x.subtle,

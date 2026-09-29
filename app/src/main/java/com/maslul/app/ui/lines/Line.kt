@@ -276,6 +276,8 @@ private fun LineMap(model: LineModel, d: LineDetail, color: Color, now: Instant)
             focusVehicleId = followed?.mapId,
             onUserPan = { model.following = null },
             onMarkerClick = { id -> if (model.vehicles.any { it.mapId == id }) model.following = id },
+            compassAlignment = Alignment.BottomEnd,
+            compassModifier = Modifier.padding(8.dp),
         )
         if (followed != null) {
             LiveLocationCard(

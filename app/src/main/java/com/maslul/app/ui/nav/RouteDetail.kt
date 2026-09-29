@@ -420,6 +420,7 @@ private fun RouteMap(model: RouteDetailModel, modifier: Modifier, padding: Paddi
         controller = controller,
         focusVehicleId = followId,
         onUserPan = { model.following = null },
+        compassModifier = Modifier.statusBarsPadding().padding(top = 124.dp, end = 16.dp),
     )
 }
 
@@ -496,7 +497,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
                     time = { TimeText(leg.start, live?.takeIf { it.status == LiveStatus.LIVE }?.let { it.expected }, live.freshness(now)) },
                 ) {
                     Text(leg.from.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
-                    leg.from.track?.let { Text("Platform $it", style = MaterialTheme.typography.bodySmall, color = x.subtle) }
+                    leg.from.platformLabel?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = x.subtle) }
                     model.tightTransferInto(leg)?.let { TransferWarning(it, Modifier.padding(top = 4.dp)) }
                 }
                 TransitSegment(model, i, leg, rail, live, now)
@@ -664,7 +665,7 @@ private fun LineOptions(leg: Leg, rides: List<Leg>, now: Instant, rideLive: Map<
                         fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal,
                     )
                     Text(
-                        o.headsign?.let { "to $it" } ?: modeName(o.mode),
+                        listOfNotNull(o.headsign?.let { "to $it" } ?: modeName(o.mode), o.from.platformLabel).joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }

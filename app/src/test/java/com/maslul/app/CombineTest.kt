@@ -108,7 +108,7 @@ class CombineTest {
             bus("5", "A", 0.0, "B", 5.0, 14, 38), // misses the train
             bus("92", "A", 0.0, "B", 5.0, 13, 35), // second run of 92: kept, the next few of a line are offered
             bus("40", "A", 0.0, "B", 5.0, 2, 22), // scheduled earlier: kept in case it's running late
-            bus("41", "A", 0.0, "B", 5.0, -30, -10), // far too early to be merely late
+            bus("41", "A", 0.0, "B", 5.0, -100, -80), // far too early to be merely late
             bus("7", "Z", 3.0, "B", 5.0, 12, 30), // other stop
         )
         val leg = Combine.addAlternatives(a, 0, rides).legs[0]

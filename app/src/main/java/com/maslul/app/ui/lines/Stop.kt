@@ -136,6 +136,8 @@ fun StopScreen(model: StopModel) {
                 user = model.location.last.collectAsState().value,
                 initialCenter = model.place.point,
                 initialZoom = 16.0,
+                compassAlignment = Alignment.BottomEnd,
+                compassModifier = Modifier.padding(8.dp),
             )
             if (model.loading) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp)) else Spacer(Modifier.height(2.dp))
             when {
@@ -176,7 +178,7 @@ private fun BoardRow(g: BoardGroup, now: Instant, onTimeClick: () -> Unit, onCli
             Text(d.headsign, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             val later = g.entries.drop(1).take(2).joinToString("  ") { Fmt.time(it.live?.best ?: it.departure.scheduled) }
-            Text(listOfNotNull(d.agency, later.takeIf { it.isNotBlank() }?.let { "then $it" }).joinToString(" · "),
+            Text(listOfNotNull(d.stop.platformLabel, d.agency, later.takeIf { it.isNotBlank() }?.let { "then $it" }).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1)
         }
         Spacer(Modifier.width(8.dp))

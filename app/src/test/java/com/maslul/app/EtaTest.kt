@@ -173,7 +173,7 @@ class EtaTest {
         )
         assertEquals(listOf("next"), board.map { it.departure.tripId })
         // Nothing older than the look-back window is kept.
-        assertTrue(TransitRepository.mergeDepartures(emptyList(), listOf(departure("old", now.minusSeconds(3600))), now).isEmpty())
+        assertTrue(TransitRepository.mergeDepartures(emptyList(), listOf(departure("old", now.minusSeconds(TransitRepository.LATE_WINDOW_SEC + 60))), now).isEmpty())
     }
 
     @Test

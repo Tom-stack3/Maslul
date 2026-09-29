@@ -170,6 +170,7 @@ fun NavHomeScreen(model: NavHomeModel) {
             onMarkerClick = { id -> model.stops.firstOrNull { it.stopId == id }?.let(model::openStop) },
             onLongPress = { p -> model.planTo(Place("Dropped pin", p.lat, p.lon, kind = PlaceKind.PIN)) },
             onCameraIdle = model::onCameraIdle,
+            compassModifier = Modifier.statusBarsPadding().padding(top = 84.dp, end = 16.dp),
         )
 
         // Search card

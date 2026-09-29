@@ -8,7 +8,13 @@ import android.view.Gravity
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas as ComposeCanvas
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.runtime.Composable
@@ -19,7 +25,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
@@ -31,6 +41,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.maslul.app.data.GeoPoint
+import kotlin.math.abs
 import com.maslul.app.ui.theme.LocalExtra
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -105,6 +116,9 @@ fun TransitMap(
     focusVehicleId: String? = null,
     /** Called when the user drags the map, so the screen can stop following. */
     onUserPan: (() -> Unit)? = null,
+    /** Where the compass (shown once the map is rotated or tilted) sits, clear of the screen's own buttons. */
+    compassAlignment: Alignment = Alignment.TopEnd,
+    compassModifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val dark = LocalExtra.current.isDark
@@ -119,6 +133,11 @@ fun TransitMap(
     val followingNow by rememberUpdatedState(focusVehicleId?.takeIf { id -> vehicles.any { it.id == id } })
     /** Where each vehicle is currently drawn, so refreshed positions glide instead of jumping. */
     val drawn = remember { HashMap<String, GeoPoint>() }
+    /** Camera rotation and tilt, for the compass. */
+    var bearing by remember { mutableStateOf(0f) }
+    var tilt by remember { mutableStateOf(0f) }
+    /** Which way the phone faces, shown as a cone on the user's dot. */
+    val heading = rememberHeading(enabled = user != null, at = user)
 
     val mapView = remember {
         MapView(context).apply { onCreate(null) }
@@ -152,8 +171,9 @@ fun TransitMap(
             m.uiSettings.apply {
                 isCompassEnabled = false
                 isLogoEnabled = false
-                isRotateGesturesEnabled = false
-                isTiltGesturesEnabled = false
+                // Two-finger twist rotates, two-finger drag up/down tilts; the compass resets both.
+                isRotateGesturesEnabled = true
+                isTiltGesturesEnabled = true
                 attributionGravity = Gravity.BOTTOM or Gravity.START
             }
             val c = initialCenter ?: fitPoints.firstOrNull() ?: GeoPoint(32.08, 34.79)
@@ -171,7 +191,13 @@ fun TransitMap(
             m.addOnCameraMoveStartedListener { reason ->
                 if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) userPan?.invoke()
             }
+            m.addOnCameraMoveListener {
+                val c = m.cameraPosition
+                if (abs(c.bearing.toFloat() - bearing) > 0.5f) bearing = c.bearing.toFloat()
+                if (abs(c.tilt.toFloat() - tilt) > 0.5f) tilt = c.tilt.toFloat()
+            }
             m.addOnCameraIdleListener {
+                m.cameraPosition.let { c -> bearing = c.bearing.toFloat(); tilt = c.tilt.toFloat() }
                 m.cameraPosition.target?.let { t -> cameraIdle?.invoke(GeoPoint(t.latitude, t.longitude)) }
             }
             controller?.map = m
@@ -189,12 +215,17 @@ fun TransitMap(
     }
 
     // Push data into the map whenever it (or the style) changes.
-    LaunchedEffect(style, lines, markers, user) {
+    LaunchedEffect(style, lines, markers) {
         val s = style ?: return@LaunchedEffect
         (s.getSource("m-lines") as? GeoJsonSource)?.setGeoJson(linesFc(lines))
         (s.getSource("m-markers") as? GeoJsonSource)?.setGeoJson(markersFc(markers))
+    }
+    LaunchedEffect(style, user, heading) {
+        val s = style ?: return@LaunchedEffect
         (s.getSource("m-user") as? GeoJsonSource)?.setGeoJson(
-            FeatureCollection.fromFeatures(listOfNotNull(user?.let { Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) })),
+            FeatureCollection.fromFeatures(listOfNotNull(user?.let {
+                Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)).apply { heading?.let { h -> addNumberProperty("heading", h) } }
+            })),
         )
     }
 
@@ -277,7 +308,44 @@ fun TransitMap(
         }
     }
 
-    AndroidView(factory = { mapView }, modifier = modifier)
+    Box(modifier) {
+        AndroidView(factory = { mapView }, modifier = Modifier.matchParentSize())
+        if (abs(angleDiff(bearing, 0f)) > 1f || tilt > 1f) {
+            Compass(bearing, Modifier.align(compassAlignment).then(compassModifier)) {
+                map?.animateCamera(
+                    CameraUpdateFactory.newCameraPosition(CameraPosition.Builder().bearing(0.0).tilt(0.0).build()),
+                    400,
+                )
+            }
+        }
+    }
+}
+
+/** North needle turned with the map; tapping it puts north back up and the map flat. */
+@Composable
+private fun Compass(bearing: Float, modifier: Modifier, onClick: () -> Unit) {
+    val north = Color(0xFFE5484D)
+    val south = MaterialTheme.colorScheme.outline
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        shadowElevation = 4.dp,
+        color = MaterialTheme.colorScheme.surface,
+        modifier = modifier.size(40.dp).semantics { contentDescription = "Reset map to north" },
+    ) {
+        ComposeCanvas(Modifier.size(40.dp).rotate(-bearing)) {
+            val w = size.width * 0.13f
+            val h = size.height * 0.32f
+            val cx = center.x
+            val cy = center.y
+            drawPath(androidx.compose.ui.graphics.Path().apply {
+                moveTo(cx, cy - h); lineTo(cx + w, cy); lineTo(cx - w, cy); close()
+            }, north)
+            drawPath(androidx.compose.ui.graphics.Path().apply {
+                moveTo(cx, cy + h); lineTo(cx + w, cy); lineTo(cx - w, cy); close()
+            }, south)
+        }
+    }
 }
 
 private fun setupLayers(s: Style, dark: Boolean) {
@@ -325,6 +393,19 @@ private fun setupLayers(s: Style, dark: Boolean) {
             PropertyFactory.circleStrokeColor(Expression.toColor(Expression.get("stroke"))),
             PropertyFactory.circleStrokeWidth(Expression.get("sw")),
         ),
+    )
+    s.addImage("user-heading", headingCone())
+    s.addLayer(
+        SymbolLayer("m-user-heading", "m-user")
+            .withFilter(Expression.has("heading"))
+            .withProperties(
+                PropertyFactory.iconImage("user-heading"),
+                PropertyFactory.iconRotate(Expression.get("heading")),
+                PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+                PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP),
+                PropertyFactory.iconAllowOverlap(true),
+                PropertyFactory.iconIgnorePlacement(true),
+            ),
     )
     s.addLayer(
         CircleLayer("m-user-halo", "m-user").withProperties(
@@ -420,6 +501,31 @@ private fun vehiclesFc(vs: List<MapVehicle>, focusId: String?) = FeatureCollecti
         }
     },
 )
+
+/** Google-Maps-style beam: a blue wedge pointing up (north), fading out from the dot. */
+private fun headingCone(): Bitmap {
+    // Drawn at 3x (xxhdpi): ~88dp across.
+    val size = 264
+    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    bmp.density = android.util.DisplayMetrics.DENSITY_XXHIGH
+    val c = size / 2f
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        shader = android.graphics.RadialGradient(
+            c, c, c,
+            intArrayOf(0xA61F6FEB.toInt(), 0x4D1F6FEB, 0x001F6FEB),
+            floatArrayOf(0f, 0.55f, 1f),
+            android.graphics.Shader.TileMode.CLAMP,
+        )
+    }
+    // Android arc angles start east; up is -90 deg, so a 70 deg beam spans -125..-55.
+    val wedge = Path().apply {
+        moveTo(c, c)
+        arcTo(android.graphics.RectF(0f, 0f, size.toFloat(), size.toFloat()), -125f, 70f)
+        close()
+    }
+    Canvas(bmp).drawPath(wedge, paint)
+    return bmp
+}
 
 private fun iconName(c: Color, pointed: Boolean) = "veh-${hex(c)}-${if (pointed) "p" else "c"}"
 

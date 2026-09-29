@@ -75,6 +75,12 @@ import kotlinx.coroutines.launch
 
 enum class SearchField { FROM, TO }
 
+/** A chosen place's name as field text; "Current location" isn't text to edit, so it leaves the field empty. */
+private fun fieldText(p: Place?): TextFieldValue {
+    val name = p?.takeIf { it.kind != PlaceKind.CURRENT_LOCATION }?.name.orEmpty()
+    return TextFieldValue(name, TextRange(name.length))
+}
+
 /**
  * Place search. In trip mode it fills From and To and calls [onDone] once both are set;
  * with [single] it returns the first chosen place.
@@ -91,8 +97,8 @@ class SearchModel(
     var from by mutableStateOf(from)
     var to by mutableStateOf(to)
     var editing by mutableStateOf(editing)
-    var fromText by mutableStateOf(TextFieldValue(from?.name ?: ""))
-    var toText by mutableStateOf(TextFieldValue(to?.name ?: ""))
+    var fromText by mutableStateOf(fieldText(from))
+    var toText by mutableStateOf(fieldText(to))
     var results by mutableStateOf<List<Place>>(emptyList())
     var loading by mutableStateOf(false)
     var failed by mutableStateOf(false)
@@ -126,9 +132,9 @@ class SearchModel(
     fun choose(p: Place) {
         if (single) { onDone(p, null); return }
         if (editing == SearchField.FROM) {
-            from = p; fromText = TextFieldValue(p.name, TextRange(p.name.length))
+            from = p; fromText = fieldText(p)
         } else {
-            to = p; toText = TextFieldValue(p.name, TextRange(p.name.length))
+            to = p; toText = fieldText(p)
         }
         results = emptyList()
         val f = from
@@ -175,7 +181,7 @@ fun SearchScreen(model: SearchModel) {
                         if (!model.single) {
                             Field(
                                 value = model.fromText,
-                                placeholder = "Starting point",
+                                placeholder = if (model.from?.kind == PlaceKind.CURRENT_LOCATION) "Current location" else "Starting point",
                                 dotColor = MaterialTheme.colorScheme.onSurface,
                                 hollow = true,
                                 active = model.editing == SearchField.FROM,
@@ -188,7 +194,11 @@ fun SearchScreen(model: SearchModel) {
                         }
                         Field(
                             value = model.toText,
-                            placeholder = if (model.single) "Search address or place" else "Where to?",
+                            placeholder = when {
+                                model.single -> "Search address or place"
+                                model.to?.kind == PlaceKind.CURRENT_LOCATION -> "Current location"
+                                else -> "Where to?"
+                            },
                             dotColor = MaterialTheme.colorScheme.primary,
                             hollow = false,
                             active = model.editing == SearchField.TO,

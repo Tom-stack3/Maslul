@@ -66,6 +66,23 @@ class LiveApiSmokeTest {
     }
 
     @Test
+    fun findsRidesAfterATransfer() = runBlocking {
+        // Tel Aviv → Haifa: usually a change, whose next rides tell the wait if it's missed.
+        val r = repo.plan(TransitousApi.PlanRequest(GeoPoint(32.0775, 34.7746), GeoPoint(32.7614, 35.0195)))
+        val leg = r.itineraries.first { it.transitLegs.size > 1 }.transitLegs[1]
+        val after = repo.ridesAfter(leg, TransitMode.entries.filter { it.isTransit }.toSet())
+        println("after ${leg.lineLabel} ${leg.start}: ${after.map { "${it.lineLabel} ${it.start}" }}")
+        assertTrue(after.all { it.start.isAfter(leg.start) })
+    }
+
+    @Test
+    fun searchesStops() = runBlocking {
+        val r = repo.searchStops("סבידור", GeoPoint(32.0741, 34.7922))
+        println("stops: ${r.take(4).map { "${it.name} ${it.stopId}" }}")
+        assertTrue(r.isNotEmpty() && r.all { it.stopId != null })
+    }
+
+    @Test
     fun findsNearbyLines() = runBlocking {
         val here = GeoPoint(32.0741, 34.7922)
         val lines = repo.nearbyLines(here, repo.nearbyStops(here))

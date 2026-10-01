@@ -23,6 +23,8 @@ object Combine {
     const val LATE_SEC = TransitRepository.LATE_WINDOW_SEC
     /** Leeway when judging whether a bus can still be caught. */
     private const val CATCH_SLACK_SEC = 90L
+    /** Hurrying (a brisk walk or a jog) covers a walk in this share of its time. */
+    private const val HURRY_SHARE = 0.5
 
     fun sameStop(a: StopCall, b: StopCall): Boolean {
         if (a.stopId != null && a.stopId == b.stopId) return true
@@ -91,7 +93,8 @@ object Combine {
      * alternatives on leg [legIndex], keeping only those that still fit the journey: after
      * the previous connection, in time for the next one, and not before [now]. Rides
      * scheduled up to [LATE_SEC] too early are kept too — a late bus may still be catchable,
-     * which [catchable] decides once live data is in.
+     * which [catchable] decides once live data is in — but only for a ride that's about to
+     * happen: a bus planned for tomorrow can't be running late yet.
      */
     fun addAlternatives(itin: Itinerary, legIndex: Int, rides: List<Leg>, now: Instant? = null): Itinerary {
         val leg = itin.legs.getOrNull(legIndex)?.takeIf { it.mode.isTransit } ?: return itin
@@ -108,11 +111,13 @@ object Combine {
         }
         val latestEnd = if (next >= 0) after[next].start.minusSeconds(after.take(next).sumOf { it.durationSec }) else null
         val latestStart = leg.start.plusSeconds(WINDOW_SEC)
+        val soon = now == null || !now.plusSeconds(LATE_SEC).isBefore(earliest)
+        val lateFrom = if (soon) earliest.minusSeconds(LATE_SEC) else earliest
 
         val perLine = leg.options.groupingBy(::lineKey).eachCount().toMutableMap()
         val added = rides
             .filter { sameRide(it, leg) && leg.options.none { o -> sameTrip(o, it) } }
-            .filter { !it.start.isBefore(earliest.minusSeconds(LATE_SEC)) && !it.start.isAfter(latestStart) }
+            .filter { !it.start.isBefore(lateFrom) && !it.start.isAfter(latestStart) }
             .filter { latestEnd == null || !it.end.isAfter(latestEnd) }
             .distinctBy { it.rideKey }
             .sortedBy { it.start }
@@ -124,13 +129,24 @@ object Combine {
     }
 
     /**
+     * Rides between the same two stops that leave after [leg] (any line), soonest first: what's
+     * left if it's missed. [found] adds rides looked up separately to the leg's own options.
+     */
+    fun ridesAfter(leg: Leg, found: List<Leg>, count: Int = 2): List<Leg> =
+        (leg.options + found)
+            .filter { sameRide(it, leg) && it.start.isAfter(leg.start) && !sameTrip(it, leg) }
+            .distinctBy { it.rideKey }
+            .sortedBy { it.start }
+            .take(count)
+
+    /**
      * When you can be at leg [legIndex]'s boarding stop: [now] plus the walk there for the
      * first ride, else when the previous ride gets in plus the walk between.
      */
-    fun reachBy(itin: Itinerary, legIndex: Int, now: Instant): Instant {
+    fun reachBy(itin: Itinerary, legIndex: Int, now: Instant, hurry: Boolean = false): Instant {
         val before = itin.legs.subList(0, legIndex.coerceIn(0, itin.legs.size))
         val prev = before.indexOfLast { it.mode.isTransit }
-        val walk = before.drop(prev + 1).sumOf { it.durationSec }
+        val walk = before.drop(prev + 1).sumOf { it.durationSec }.let { if (hurry) (it * HURRY_SHARE).toLong() else it }
         return (if (prev >= 0) maxOf(before[prev].end, now) else now).plusSeconds(walk)
     }
 
@@ -156,11 +172,26 @@ object Combine {
         return !boards(option, call).isBefore(reachBy.minusSeconds(CATCH_SLACK_SEC))
     }
 
-    /** Leg [legIndex]'s options that can still be caught, soonest first. */
-    fun catchableOptions(itin: Itinerary, legIndex: Int, now: Instant, liveOf: (Leg) -> LiveCall?): List<Leg> {
+    /**
+     * Whether [option] can be caught only by hurrying to the stop: it's tracked live and hasn't
+     * passed, and it comes before you'd walk there but not before you could hurry there.
+     */
+    fun onlyByHurrying(itin: Itinerary, legIndex: Int, option: Leg, now: Instant, call: LiveCall?): Boolean {
+        if (call?.status != LiveStatus.LIVE || catchable(option, call, reachBy(itin, legIndex, now))) return false
+        return !boards(option, call).isBefore(reachBy(itin, legIndex, now, hurry = true).minusSeconds(CATCH_SLACK_SEC))
+    }
+
+    /**
+     * Leg [legIndex]'s options that can still be caught, soonest first. With [hurry], also live
+     * buses you'd catch only by hurrying ([onlyByHurrying]): worth showing, so you can run for
+     * one you see is close, but not planned on.
+     */
+    fun catchableOptions(itin: Itinerary, legIndex: Int, now: Instant, hurry: Boolean = false, liveOf: (Leg) -> LiveCall?): List<Leg> {
         val leg = itin.legs.getOrNull(legIndex)?.takeIf { it.mode.isTransit } ?: return emptyList()
         val by = reachBy(itin, legIndex, now)
-        return leg.options.filter { catchable(it, liveOf(it), by) }.sortedBy { boards(it, liveOf(it)) }
+        return leg.options
+            .filter { catchable(it, liveOf(it), by) || (hurry && onlyByHurrying(itin, legIndex, it, now, liveOf(it))) }
+            .sortedBy { boards(it, liveOf(it)) }
     }
 
     /**
@@ -169,7 +200,7 @@ object Combine {
      */
     fun bestOption(itin: Itinerary, legIndex: Int, now: Instant, liveOf: (Leg) -> LiveCall?): Leg? {
         val leg = itin.legs.getOrNull(legIndex)?.takeIf { it.mode.isTransit } ?: return null
-        val best = catchableOptions(itin, legIndex, now, liveOf)
+        val best = catchableOptions(itin, legIndex, now, liveOf = liveOf)
             .minWithOrNull(compareBy<Leg>({ arrives(it, liveOf(it)) }, { boards(it, liveOf(it)) })) ?: return null
         return best.takeIf { it.rideKey != leg.rideKey }
     }

@@ -3,7 +3,8 @@ package com.maslul.app.data
 /**
  * Ranks itineraries by how good they are to actually take, not just by arrival time:
  * every transfer costs a few minutes, and tight or walking transfers (where a bus that is a
- * little early or late means missing the connection) cost more.
+ * little early or late means missing the connection) cost more. With a [RailPreference], time
+ * on buses costs extra too.
  */
 object Ranking {
     /** Connections with less spare time than this are flagged as tight. */
@@ -55,26 +56,34 @@ object Ranking {
             p
         }
 
+    /** Extra "virtual seconds" for riding buses, for riders who'd rather take the train. */
+    fun busPenalty(itin: Itinerary, rail: RailPreference): Double {
+        if (rail == RailPreference.NONE) return 0.0
+        return itin.legs.filter { it.mode == TransitMode.BUS }.sumOf { it.durationSec * rail.busMinuteCost + rail.busLegSec }
+    }
+
     /** Lower is better: arrival (or, for arrive-by, departure) plus penalties. */
-    fun score(itin: Itinerary, arriveBy: Boolean, walkMps: Double = 1.3): Double {
+    fun score(itin: Itinerary, arriveBy: Boolean, walkMps: Double = 1.3, rail: RailPreference = RailPreference.NONE): Double {
         val base = if (arriveBy) -itin.start.epochSecond.toDouble() else itin.end.epochSecond.toDouble()
-        return base + riskPenalty(itin, walkMps) + itin.walkSec * WALK_WEIGHT
+        return base + riskPenalty(itin, walkMps) + itin.walkSec * WALK_WEIGHT + busPenalty(itin, rail)
     }
 
     /**
      * True if [a] is at least as good as [b] on every count — leaves no earlier, arrives no
-     * later, no more transfers, walking or risk — and strictly better on one.
+     * later, no more transfers, walking, risk or (when rail is preferred) bus riding — and
+     * strictly better on one.
      */
-    fun dominates(a: Itinerary, b: Itinerary, walkMps: Double = 1.3): Boolean {
+    fun dominates(a: Itinerary, b: Itinerary, walkMps: Double = 1.3, rail: RailPreference = RailPreference.NONE): Boolean {
         if (a.start < b.start || a.end > b.end || a.transfers > b.transfers) return false
         if (a.walkSec > b.walkSec + 60) return false
         if (riskPenalty(a, walkMps) > riskPenalty(b, walkMps)) return false
+        if (busPenalty(a, rail) > busPenalty(b, rail)) return false
         return a.end < b.end || a.start > b.start || a.transfers < b.transfers
     }
 
     /** Drops clearly dominated options and sorts the rest by [score]. */
-    fun rank(list: List<Itinerary>, arriveBy: Boolean, walkMps: Double = 1.3): List<Itinerary> {
-        val kept = list.filter { b -> list.none { a -> a !== b && dominates(a, b, walkMps) } }
-        return kept.sortedWith(compareBy<Itinerary> { score(it, arriveBy, walkMps) }.thenBy { it.start })
+    fun rank(list: List<Itinerary>, arriveBy: Boolean, walkMps: Double = 1.3, rail: RailPreference = RailPreference.NONE): List<Itinerary> {
+        val kept = list.filter { b -> list.none { a -> a !== b && dominates(a, b, walkMps, rail) } }
+        return kept.sortedWith(compareBy<Itinerary> { score(it, arriveBy, walkMps, rail) }.thenBy { it.start })
     }
 }

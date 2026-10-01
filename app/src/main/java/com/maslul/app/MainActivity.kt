@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Directions
 import androidx.compose.material.icons.rounded.Navigation
+import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material.icons.rounded.Timeline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -50,6 +51,8 @@ import com.maslul.app.ui.lines.LineModel
 import com.maslul.app.ui.lines.LineScreen
 import com.maslul.app.ui.lines.LinesHomeModel
 import com.maslul.app.ui.lines.LinesHomeScreen
+import com.maslul.app.ui.lines.StationsHomeModel
+import com.maslul.app.ui.lines.StationsHomeScreen
 import com.maslul.app.ui.lines.StopModel
 import com.maslul.app.ui.lines.StopScreen
 import com.maslul.app.ui.lines.TripModel
@@ -156,6 +159,13 @@ fun AppShell(nav: AppNav) {
                     label = { Text("Lines") },
                     modifier = Modifier.testTag("tab_lines"),
                 )
+                NavigationBarItem(
+                    selected = nav.tab == Tab.STATIONS,
+                    onClick = { nav.selectTab(Tab.STATIONS) },
+                    icon = { Icon(Icons.Rounded.Place, null) },
+                    label = { Text("Stations") },
+                    modifier = Modifier.testTag("tab_stations"),
+                )
             }
         }
     }
@@ -171,6 +181,7 @@ private fun ScreenHost(screen: ScreenModel) {
         is RouteDetailModel -> RouteDetailScreen(screen)
         is SettingsModel -> SettingsScreen(screen)
         is LinesHomeModel -> LinesHomeScreen(screen)
+        is StationsHomeModel -> StationsHomeScreen(screen)
         is LineModel -> LineScreen(screen)
         is StopModel -> StopScreen(screen)
         is TripModel -> TripScreen(screen)

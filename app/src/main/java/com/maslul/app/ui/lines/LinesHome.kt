@@ -52,18 +52,16 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.maslul.app.data.GeoMath
 import com.maslul.app.data.Line
 import com.maslul.app.data.NearbyLine
 import com.maslul.app.data.LineRoute
-import com.maslul.app.data.Place
 import com.maslul.app.data.TransitMode
 import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
 import com.maslul.app.ui.components.Fmt
 import com.maslul.app.ui.components.LineBadge
+import com.maslul.app.ui.components.LoadingBox
 import com.maslul.app.ui.components.MessageBox
-import com.maslul.app.ui.components.PlaceRow
 import com.maslul.app.ui.components.SectionHeader
 import com.maslul.app.ui.components.lineColor
 import com.maslul.app.ui.components.modeIcon
@@ -82,7 +80,6 @@ class LinesHomeModel(nav: AppNav) : ScreenModel(nav) {
     var results by mutableStateOf<List<Line>>(emptyList())
     var loading by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
-    var nearby by mutableStateOf<List<Place>>(emptyList())
     var nearbyLoading by mutableStateOf(false)
     var nearbyLines by mutableStateOf<List<NearbyLine>>(emptyList())
     var linesLoading by mutableStateOf(false)
@@ -120,7 +117,6 @@ class LinesHomeModel(nav: AppNav) : ScreenModel(nav) {
             nearbyLoading = true
             val here = location.current() ?: location.last.value
             val stops = here?.let { runCatching { repo.nearbyStops(it) }.getOrNull() }
-            if (stops != null) nearby = stops.take(12)
             nearbyLoading = false
             if (here != null && stops != null) {
                 linesLoading = true
@@ -137,13 +133,11 @@ class LinesHomeModel(nav: AppNav) : ScreenModel(nav) {
     }
 
     fun open(route: LineRoute) = nav.push(LineModel(nav, route))
-    fun openStop(p: Place) = nav.push(StopModel(nav, p))
 }
 
 @Composable
 fun LinesHomeScreen(model: LinesHomeModel) {
     val data by model.store.data.collectAsState()
-    val here by model.location.last.collectAsState()
     val ctx = LocalContext.current
     var now by remember { mutableStateOf(Instant.now()) }
     LaunchedEffect(Unit) { model.loadNearby() }
@@ -152,33 +146,7 @@ fun LinesHomeScreen(model: LinesHomeModel) {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(Modifier.background(MaterialTheme.colorScheme.surface).statusBarsPadding()) {
             Text("Lines", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 10.dp))
-            Row(
-                Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 14.dp).height(50.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Rounded.Search, null, tint = LocalExtra.current.subtle)
-                Spacer(Modifier.width(10.dp))
-                Box(Modifier.weight(1f)) {
-                    if (model.query.isEmpty()) {
-                        Text("Line number or name, e.g. 480", color = LocalExtra.current.subtle, style = MaterialTheme.typography.bodyLarge)
-                    }
-                    BasicTextField(
-                        value = model.query,
-                        onValueChange = model::onQuery,
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, keyboardType = KeyboardType.Text),
-                        modifier = Modifier.fillMaxWidth().testTag("line_search"),
-                    )
-                }
-                if (model.query.isNotEmpty()) {
-                    IconButton(onClick = { model.onQuery("") }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Rounded.Close, "Clear", Modifier.size(18.dp))
-                    }
-                }
-            }
+            SearchBox(model.query, model::onQuery, "Line number or name, e.g. 480", Modifier.testTag("line_search"))
             Row(
                 Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -209,40 +177,51 @@ fun LinesHomeScreen(model: LinesHomeModel) {
                     item { SectionHeader("Favorite lines") }
                     items(data.favoriteLines, key = { "fav-${it.operatorRef}-${it.mkt}" }) { r -> LineRow(r, favorite = true) { model.open(r) } }
                 }
-                if (data.favoriteStops.isNotEmpty()) {
-                    item { SectionHeader("Favorite stops") }
-                    items(data.favoriteStops, key = { "fs-${it.stopId}" }) { p ->
-                        PlaceRow(p.name, p.subtitle, icon = Icons.Rounded.Star, iconTint = ModeColors.Bus) { model.openStop(p) }
-                    }
-                }
                 val lines = model.nearbyLines.filter { model.mode == null || it.departure.mode == model.mode }
-                if (lines.isNotEmpty() || model.linesLoading) {
-                    item { SectionHeader("Nearby lines") }
-                    if (lines.isEmpty()) item { com.maslul.app.ui.components.LoadingBox() }
-                    items(lines.take(10), key = { "nl-${it.departure.routeId}-${it.departure.headsign}" }) { l ->
-                        NearbyLineRow(l, now) {
-                            model.openLine(l) { Toast.makeText(ctx, "Line details unavailable", Toast.LENGTH_SHORT).show() }
-                        }
-                    }
-                }
-                item { SectionHeader("Nearby stations", action = "Refresh", onAction = model::loadNearby) }
-                if (model.nearby.isEmpty()) {
+                item { SectionHeader("Nearby lines", action = "Refresh", onAction = model::loadNearby) }
+                if (lines.isEmpty()) {
                     item {
-                        if (model.nearbyLoading) com.maslul.app.ui.components.LoadingBox()
-                        else MessageBox("No stops nearby", body = "Allow location access to see stations around you.", icon = Icons.Rounded.NearMe)
+                        if (model.nearbyLoading || model.linesLoading) LoadingBox()
+                        else MessageBox("No lines nearby", body = "Allow location access to see lines around you.", icon = Icons.Rounded.NearMe)
                     }
                 }
-                items(model.nearby, key = { "nb-${it.stopId}" }) { p ->
-                    PlaceRow(
-                        p.name, p.subtitle, icon = modeIcon(TransitMode.BUS), iconTint = ModeColors.Bus,
-                        trailing = {
-                            here?.let { h ->
-                                Text(Fmt.distance(GeoMath.distance(h, p.point)), style = MaterialTheme.typography.labelMedium,
-                                    color = LocalExtra.current.subtle)
-                            }
-                        },
-                    ) { model.openStop(p) }
+                items(lines.take(10), key = { "nl-${it.departure.routeId}-${it.departure.headsign}" }) { l ->
+                    NearbyLineRow(l, now) {
+                        model.openLine(l) { Toast.makeText(ctx, "Line details unavailable", Toast.LENGTH_SHORT).show() }
+                    }
                 }
+            }
+        }
+    }
+}
+
+/** The rounded search field at the top of the Lines and Stations tabs. */
+@Composable
+fun SearchBox(query: String, onQuery: (String) -> Unit, placeholder: String, fieldModifier: Modifier = Modifier) {
+    Row(
+        Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 14.dp).height(50.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.Search, null, tint = LocalExtra.current.subtle)
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text(placeholder, color = LocalExtra.current.subtle, style = MaterialTheme.typography.bodyLarge)
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQuery,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, keyboardType = KeyboardType.Text),
+                modifier = Modifier.fillMaxWidth().then(fieldModifier),
+            )
+        }
+        if (query.isNotEmpty()) {
+            IconButton(onClick = { onQuery("") }, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Rounded.Close, "Clear", Modifier.size(18.dp))
             }
         }
     }

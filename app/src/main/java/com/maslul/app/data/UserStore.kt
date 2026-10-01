@@ -16,6 +16,16 @@ enum class WalkSpeed(val mps: Double, val label: String) {
     SLOW(1.0, "Relaxed"), NORMAL(1.3, "Normal"), FAST(1.6, "Brisk")
 }
 
+/**
+ * How much to favour trains and light rail over buses (some riders get motion-sick on buses).
+ * Each minute on a bus counts as [busMinuteCost] extra minutes when ranking, plus [busLegSec]
+ * per bus boarded.
+ */
+@Serializable
+enum class RailPreference(val label: String, val busMinuteCost: Double, val busLegSec: Double) {
+    NONE("No", 0.0, 0.0), PREFER("Yes", 0.35, 240.0), STRONG("Strongly", 0.75, 450.0)
+}
+
 /** Longest walk to or from a stop that route planning allows by default. */
 const val DEFAULT_MAX_WALK_MINUTES = 20
 
@@ -29,6 +39,7 @@ data class Settings(
         TransitMode.METRO, TransitMode.CABLE_CAR, TransitMode.FERRY,
     ),
     val wheelchair: Boolean = false,
+    val railPreference: RailPreference = RailPreference.NONE,
     val reminderMinutes: Int = 5,
 )
 

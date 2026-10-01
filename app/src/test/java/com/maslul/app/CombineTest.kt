@@ -207,4 +207,43 @@ class CombineTest {
         val leg = Combine.addAlternatives(planned, 1, more, now = at(4)).legs[1]
         assertEquals(listOf(12, 14, 18).map { at(it) }, leg.options.map { it.start })
     }
+
+    @Test
+    fun ridesAfterListsLaterRidesOfAnyLineOnTheSameHop() {
+        val leg = direct("16", 12, 30).legs[1].copy(alternatives = listOf(bus("16", "A", 0.2, "B", 5.0, 8, 26)))
+        val found = listOf(
+            bus("92", "A", 0.2, "B", 5.0, 20, 38),
+            bus("16", "A", 0.2, "B", 5.0, 27, 45),
+            leg, // the ride itself
+            bus("5", "A", 0.2, "C", 9.0, 15, 40), // goes elsewhere
+        )
+        val after = Combine.ridesAfter(leg, found)
+        assertEquals(listOf("92" to at(20), "16" to at(27)), after.map { it.lineLabel to it.start })
+    }
+
+    @Test
+    fun plannedTripFarAheadGetsNoEarlierBusesAsLateCandidates() {
+        val planned = direct("16", 12, 30)
+        val earlier = bus("16", "A", 0.2, "B", 5.0, 2, 20)
+        // Planning for 10:12 tomorrow: the 10:02 can't be running late yet, so it isn't offered.
+        val tomorrow = Combine.addAlternatives(planned, 1, listOf(earlier), now = at(12 - 24 * 60))
+        assertEquals(listOf("trip-16-12"), tomorrow.legs[1].options.map { it.tripId })
+        // Planning for half an hour from now, it may still be running late.
+        val soon = Combine.addAlternatives(planned, 1, listOf(earlier), now = at(-20))
+        assertEquals(listOf("trip-16-2", "trip-16-12"), soon.legs[1].options.map { it.tripId })
+    }
+
+    @Test
+    fun liveBusYouCouldHurryForIsShownButNotPlannedOn() {
+        // 3-minute walk to the stop; it's min 9, so you'd stroll there by min 12.
+        val itin = direct("16", 12, 30)
+        val bus = itin.legs[1]
+        val close = mapOf(bus.rideKey to liveAt(bus, 10)) // live: at the stop at min 10
+        assertTrue(Combine.onlyByHurrying(itin, 1, bus, at(9), close[bus.rideKey]))
+        assertEquals(emptyList<Leg>(), Combine.catchableOptions(itin, 1, at(9)) { close[it.rideKey] })
+        assertEquals(listOf(bus.rideKey), Combine.catchableOptions(itin, 1, at(9), hurry = true) { close[it.rideKey] }.map { it.rideKey })
+        // Too close to make even hurrying, or only on the timetable: not offered.
+        assertFalse(Combine.onlyByHurrying(itin, 1, bus, at(9), liveAt(bus, 8)))
+        assertFalse(Combine.onlyByHurrying(itin, 1, bus, at(11), null))
+    }
 }

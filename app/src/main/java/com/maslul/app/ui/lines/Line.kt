@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -26,25 +27,36 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +67,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.maslul.app.data.Freshness
 import com.maslul.app.data.GeoPoint
@@ -241,25 +254,70 @@ fun LineScreen(model: LineModel) {
         when {
             d == null && model.loading -> LoadingBox(text = "Loading line…")
             d == null -> MessageBox("Line unavailable", body = model.error, action = "Retry", onAction = model::retry)
-            else -> {
-                LineMap(model, d, color, now)
-                PrimaryTabRow(selectedTabIndex = model.tab, containerColor = MaterialTheme.colorScheme.surface) {
-                    val off = MaterialTheme.colorScheme.onSurfaceVariant
-                    Tab(model.tab == 0, onClick = { model.tab = 0 }, text = { Text("Stops") }, unselectedContentColor = off)
-                    Tab(model.tab == 1, onClick = { model.tab = 1 }, text = { Text("Timetable") }, unselectedContentColor = off)
+            else -> LineBody(model, d, color, now)
+        }
+    }
+}
+
+/** The map, with the stops and timetable in a sheet over it that can be dragged down (or hidden) to enlarge the map. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LineBody(model: LineModel, d: LineDetail, color: Color, now: Instant) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val peek = maxHeight * 0.62f
+        val scaffold = rememberBottomSheetScaffoldState(
+            // Dragging the sheet all the way down shows the map on its own.
+            bottomSheetState = rememberStandardBottomSheetState(initialValue = SheetValue.PartiallyExpanded, skipHiddenState = false),
+        )
+        val sheet = scaffold.bottomSheetState
+        val mapOnly = sheet.currentValue == SheetValue.Hidden && sheet.targetValue == SheetValue.Hidden
+        val scope = rememberCoroutineScope()
+        // Following a vehicle needs the map in view.
+        LaunchedEffect(model.following) {
+            if (model.following != null && sheet.currentValue == SheetValue.Expanded) sheet.partialExpand()
+        }
+        BottomSheetScaffold(
+            scaffoldState = scaffold,
+            sheetPeekHeight = peek,
+            sheetShadowElevation = 12.dp,
+            sheetContainerColor = MaterialTheme.colorScheme.surface,
+            sheetContent = {
+                Column(Modifier.fillMaxSize()) {
+                    PrimaryTabRow(selectedTabIndex = model.tab, containerColor = MaterialTheme.colorScheme.surface) {
+                        val off = MaterialTheme.colorScheme.onSurfaceVariant
+                        Tab(model.tab == 0, onClick = { model.tab = 0 }, text = { Text("Stops") }, unselectedContentColor = off)
+                        Tab(model.tab == 1, onClick = { model.tab = 1 }, text = { Text("Timetable") }, unselectedContentColor = off)
+                    }
+                    if (model.tab == 0) StopsList(model, d, color, now) else Timetable(model, d, now)
                 }
-                if (model.tab == 0) StopsList(model, d, color, now) else Timetable(model, d, now)
+            },
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                LineMap(model, d, color, now, bottomPadding = if (mapOnly) 72.dp else peek, fitTag = mapOnly)
+                FilledTonalIconButton(
+                    onClick = { scope.launch { if (mapOnly) sheet.partialExpand() else sheet.hide() } },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).testTag("line_map_expand"),
+                ) { Icon(if (mapOnly) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen, if (mapOnly) "Show stops" else "Expand map") }
+                if (mapOnly) {
+                    ExtendedFloatingActionButton(
+                        onClick = { scope.launch { sheet.partialExpand() } },
+                        icon = { Icon(Icons.Rounded.ExpandLess, null) },
+                        text = { Text(if (model.tab == 0) "Stops" else "Timetable") },
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp),
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun LineMap(model: LineModel, d: LineDetail, color: Color, now: Instant) {
+private fun LineMap(model: LineModel, d: LineDetail, color: Color, now: Instant, bottomPadding: Dp, fitTag: Boolean) {
     val stops = remember(d) { d.stops.map { GeoPoint(it.lat, it.lon) } }
     // Keep following only while that vehicle is still reported.
     val followed = model.vehicles.firstOrNull { it.mapId == model.following }
-    Box(Modifier.fillMaxWidth().height(220.dp)) {
+    Box(Modifier.fillMaxSize()) {
         TransitMap(
             modifier = Modifier.fillMaxSize(),
             lines = listOf(MapLine(d.timeline.line, color, 5f)),
@@ -271,19 +329,18 @@ private fun LineMap(model: LineModel, d: LineDetail, color: Color, now: Instant)
                     faded = it.progress.freshness(now) == Freshness.STALE)
             },
             fitPoints = stops,
-            fitKey = d.route.gtfsRouteId,
-            contentPadding = PaddingValues(top = if (followed != null) 56.dp else 0.dp),
+            fitKey = "${d.route.gtfsRouteId}-$fitTag",
+            contentPadding = PaddingValues(top = if (followed != null) 56.dp else 0.dp, bottom = bottomPadding),
             focusVehicleId = followed?.mapId,
             onUserPan = { model.following = null },
             onMarkerClick = { id -> if (model.vehicles.any { it.mapId == id }) model.following = id },
-            compassAlignment = Alignment.BottomEnd,
-            compassModifier = Modifier.padding(8.dp),
+            compassModifier = Modifier.padding(top = 64.dp, end = 12.dp),
         )
         if (followed != null) {
             LiveLocationCard(
                 "${d.route.label} live location" + (followed.ride?.let { " · left ${Fmt.time(it.departure)}" } ?: ""),
                 followed.vehicle.recordedAt,
-                Modifier.padding(8.dp).align(Alignment.TopCenter),
+                Modifier.padding(horizontal = 60.dp, vertical = 8.dp).align(Alignment.TopCenter),
                 onClose = { model.following = null },
             )
         }

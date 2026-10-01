@@ -53,6 +53,7 @@ import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.PropertyValue
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.layers.SymbolLayer
@@ -209,6 +210,7 @@ fun TransitMap(
         val m = map ?: return@LaunchedEffect
         style = null
         m.setStyle(Style.Builder().fromUri(if (dark) DARK_STYLE else LIGHT_STYLE)) { s ->
+            if (dark) brightenDark(s)
             setupLayers(s, dark)
             style = s
         }
@@ -345,6 +347,43 @@ private fun Compass(bearing: Float, modifier: Modifier, onClick: () -> Unit) {
                 moveTo(cx, cy + h); lineTo(cx + w, cy); lineTo(cx - w, cy); close()
             }, south)
         }
+    }
+}
+
+/**
+ * OpenFreeMap's dark style is near-black with grey-on-black labels, hard to read on a phone.
+ * Lifts it to a slate palette: land, roads and water stay apart, and labels are bright.
+ */
+private fun brightenDark(s: Style) {
+    fun set(id: String, vararg p: PropertyValue<*>) { s.getLayer(id)?.setProperties(*p) }
+    set("background", PropertyFactory.backgroundColor("#1E232B"))
+    set("water", PropertyFactory.fillColor("#13283D"))
+    set("waterway", PropertyFactory.lineColor("#13283D"))
+    set("landuse_residential", PropertyFactory.fillColor("#252B34"), PropertyFactory.fillOpacity(0.6f))
+    set("landcover_wood", PropertyFactory.fillColor("#1F2E27"))
+    set("landuse_park", PropertyFactory.fillColor("#1F2E27"))
+    set("building", PropertyFactory.fillColor("#2C333D"), PropertyFactory.fillOutlineColor("#363E4A"))
+    set("aeroway-area", PropertyFactory.fillColor("#252B34"))
+    set("aeroway-runway", PropertyFactory.lineColor("#3A424E"))
+    set("aeroway-taxiway", PropertyFactory.lineColor("#333A45"))
+    set("road_area_pier", PropertyFactory.fillColor("#2C333D"))
+    set("road_pier", PropertyFactory.lineColor("#2C333D"))
+    set("highway_path", PropertyFactory.lineColor("#3A414C"))
+    set("highway_minor", PropertyFactory.lineColor("#3D4550"))
+    set("highway_major_casing", PropertyFactory.lineColor("#2A3038"))
+    set("highway_major_inner", PropertyFactory.lineColor("#4C5563"))
+    set("highway_major_subtle", PropertyFactory.lineColor("#454D59"))
+    set("highway_motorway_casing", PropertyFactory.lineColor("#2A3038"))
+    set("highway_motorway_inner", PropertyFactory.lineColor("#5D6676"))
+    set("highway_motorway_subtle", PropertyFactory.lineColor("#4C5563"))
+    listOf("railway", "railway_minor", "railway_transit").forEach { set(it, PropertyFactory.lineColor("#4E5562")) }
+    listOf("railway_dashline", "railway_minor_dashline", "railway_transit_dashline").forEach { set(it, PropertyFactory.lineColor("#1E232B")) }
+    listOf("boundary_state", "boundary_country_z0-4", "boundary_country_z5-").forEach { set(it, PropertyFactory.lineColor("#59616D")) }
+    set("water_name", PropertyFactory.textColor("#7FA3C8"), PropertyFactory.textHaloColor("#13283D"))
+    set("highway_name_other", PropertyFactory.textColor("#AEB5BF"), PropertyFactory.textHaloColor("#1E232B"))
+    set("highway_name_motorway", PropertyFactory.textColor("#C3C9D1"))
+    s.layers.filter { it.id.startsWith("place_") }.forEach {
+        it.setProperties(PropertyFactory.textColor("#D5DAE0"), PropertyFactory.textHaloColor("#1E232B"))
     }
 }
 

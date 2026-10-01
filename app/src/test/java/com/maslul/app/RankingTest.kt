@@ -2,6 +2,7 @@ package com.maslul.app
 
 import com.maslul.app.data.Itinerary
 import com.maslul.app.data.Leg
+import com.maslul.app.data.RailPreference
 import com.maslul.app.data.Ranking
 import com.maslul.app.data.StopCall
 import com.maslul.app.data.TransitMode
@@ -118,5 +119,26 @@ class RankingTest {
         val it = itin("x", bus("1", "A", 0.0, "B", 2.0, 0, 10), w, bus("2", "C", 2.4, "D", 4.0, 13, 20))
         val t = Ranking.transfers(it).single()
         assertTrue(t.walkM > 400 && t.tight)
+    }
+
+    private fun train(from: String, fromKm: Double, to: String, toKm: Double, start: Int, end: Int) =
+        bus("Train", from, fromKm, to, toKm, start, end).copy(mode = TransitMode.TRAIN)
+
+    @Test
+    fun railPreferenceFavorsSlowerTrain() {
+        // The train gets there 28 minutes after the direct bus.
+        val rail = itin("rail", walk(0.0, 0.3, 2, 6, 300.0), train("A", 0.3, "F", 8.0, 6, 66), walk(8.0, 8.2, 66, 69, 200.0))
+        assertEquals("64", Ranking.rank(listOf(rail, direct), arriveBy = false).first().id)
+        assertEquals("64", Ranking.rank(listOf(rail, direct), arriveBy = false, rail = RailPreference.PREFER).first().id)
+        assertEquals("rail", Ranking.rank(listOf(rail, direct), arriveBy = false, rail = RailPreference.STRONG).first().id)
+    }
+
+    @Test
+    fun fasterBusDoesNotHideTrainWhenRailIsPreferred() {
+        // Leaves later and arrives earlier: without a preference the bus dominates the train.
+        val rail = itin("rail", walk(0.0, 0.3, 0, 4, 300.0), train("A", 0.3, "F", 8.0, 4, 45), walk(8.0, 8.2, 45, 48, 200.0))
+        assertTrue(Ranking.dominates(direct, rail))
+        assertFalse(Ranking.dominates(direct, rail, rail = RailPreference.PREFER))
+        assertEquals(2, Ranking.rank(listOf(rail, direct), arriveBy = false, rail = RailPreference.PREFER).size)
     }
 }

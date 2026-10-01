@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -128,6 +130,27 @@ class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: P
     var itinerary by mutableStateOf(original)
         private set
     private var transfers = Ranking.transfers(original, store.data.value.settings.walkSpeed.mps)
+    /** Rides found after each transfer leg's (by leg index), for the wait if it's missed; null while looking. */
+    private val after = mutableStateMapOf<Int, List<Leg>?>()
+
+    init {
+        val modes = store.data.value.settings.modes
+        val first = original.legs.indexOfFirst { it.mode.isTransit }
+        original.legs.forEachIndexed { i, l ->
+            if (i > first && l.mode.isTransit) {
+                after[i] = null
+                scope.launch {
+                    runCatching { repo.ridesAfter(l, modes) }.onSuccess { after[i] = it }.onFailure { after.remove(i) }
+                }
+            }
+        }
+    }
+
+    /** Rides leaving after the one taken on transfer leg [i] (the wait if it's missed); null until looked up. */
+    fun ridesAfter(i: Int): List<Leg>? = after[i]?.let { Combine.ridesAfter(itinerary.legs[i], it) }
+
+    /** Whether the rides after transfer leg [i] are still being looked up. */
+    fun lookingForRidesAfter(i: Int) = after.containsKey(i) && after[i] == null
 
     /** Live state of the ride currently chosen on leg [i]. */
     fun live(i: Int): LiveCall? = itinerary.legs.getOrNull(i)?.takeIf { it.mode.isTransit }?.let { rideLive[it.rideKey] }
@@ -498,7 +521,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
                 ) {
                     Text(leg.from.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
                     leg.from.platformLabel?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = x.subtle) }
-                    model.tightTransferInto(leg)?.let { TransferWarning(it, Modifier.padding(top = 4.dp)) }
+                    model.tightTransferInto(leg)?.let { TransferWarning(it, modifier = Modifier.padding(top = 4.dp)) }
                 }
                 TransitSegment(model, i, leg, rail, live, now)
                 // Alighting
@@ -571,10 +594,13 @@ private fun TransitSegment(model: RouteDetailModel, index: Int, leg: Leg, rail: 
     var open by remember { mutableStateOf(false) }
     TimelineRow(rail, rail, Node.NONE, Color.Transparent) {
         Spacer(Modifier.height(6.dp))
-        val options = Combine.catchableOptions(model.itinerary, index, now) { model.rideLive[it.rideKey] }
+        val liveOf = { o: Leg -> model.rideLive[o.rideKey] }
+        val options = Combine.catchableOptions(model.itinerary, index, now, hurry = true, liveOf = liveOf)
             .let { o -> if (o.none { it.rideKey == leg.rideKey }) o + leg else o }
         if (options.size > 1) {
-            LineOptions(leg, options, now, model.rideLive) { model.choose(index, it) }
+            LineOptions(leg, options, now, model.rideLive, hurry = { Combine.onlyByHurrying(model.itinerary, index, it, now, liveOf(it)) }) {
+                model.choose(index, it)
+            }
             Spacer(Modifier.height(8.dp))
         }
         Row(
@@ -592,6 +618,11 @@ private fun TransitSegment(model: RouteDetailModel, index: Int, leg: Leg, rail: 
         Spacer(Modifier.height(6.dp))
         val legIndex = model.itinerary.legs.indexOf(leg)
         LiveStatusChip(live, leg, now, onClick = { model.following = legIndex })
+        if (model.lookingForRidesAfter(index)) {
+            Text("If you miss it: checking the next rides…", style = MaterialTheme.typography.labelMedium,
+                color = x.subtle, modifier = Modifier.padding(top = 8.dp).testTag("missed_rides_loading"))
+        }
+        model.ridesAfter(index)?.let { MissedRides(leg, it, Modifier.padding(top = 8.dp)) }
         leg.alerts.forEach { a ->
             Row(Modifier.padding(top = 6.dp)) {
                 Icon(Icons.Rounded.WarningAmber, null, tint = Color(0xFFF5A524), modifier = Modifier.size(16.dp))
@@ -624,13 +655,52 @@ private fun TransitSegment(model: RouteDetailModel, index: Int, leg: Leg, rail: 
     }
 }
 
+/** "If you miss it: [143] 14:32 · +12 min  [5] 14:40 · +20 min" for a transfer: the next two rides. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MissedRides(leg: Leg, rides: List<Leg>, modifier: Modifier = Modifier) {
+    val x = LocalExtra.current
+    Column(modifier.testTag("missed_rides")) {
+        Text(
+            if (rides.isEmpty()) "If you miss it: no other ride within the hour" else "If you miss it, next:",
+            style = MaterialTheme.typography.labelMedium, color = x.subtle,
+        )
+        if (rides.isNotEmpty()) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(top = 4.dp),
+            ) {
+                rides.forEach { o ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LineBadge(o.lineLabel, o.mode, color = lineColor(o), showIcon = false)
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            "${Fmt.time(o.start)} · +${Fmt.duration(o.start.epochSecond - leg.start.epochSecond)}",
+                            style = MaterialTheme.typography.labelMedium.merge(Numeric), color = x.subtle,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 /**
  * Every bus that can still be caught for this ride (other lines, or the next ones of the same
  * line — including an earlier one running late), soonest first, each with its departure and arrival
  * (live when tracked). Tapping one rides it: the timeline and map follow the pick.
  */
 @Composable
-private fun LineOptions(leg: Leg, rides: List<Leg>, now: Instant, rideLive: Map<String, LiveCall>, onChoose: (Leg) -> Unit) {
+private fun LineOptions(
+    leg: Leg,
+    rides: List<Leg>,
+    now: Instant,
+    rideLive: Map<String, LiveCall>,
+    /** Buses you'd only catch by hurrying to the stop. */
+    hurry: (Leg) -> Boolean,
+    onChoose: (Leg) -> Unit,
+) {
     val x = LocalExtra.current
     val options = rides.map { it to rideLive[it.rideKey] }.sortedBy { (o, c) -> Combine.boards(o, c) }
     val lines = options.distinctBy { Combine.lineKey(it.first) }.size
@@ -671,11 +741,14 @@ private fun LineOptions(leg: Leg, rides: List<Leg>, now: Instant, rideLive: Map<
                 }
                 Spacer(Modifier.width(6.dp))
                 when (c?.status) {
-                    LiveStatus.LIVE -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        val f = c.freshness(now)
-                        LiveSignal(f)
-                        Spacer(Modifier.width(4.dp))
-                        Text(Fmt.relative(dep, now), style = MaterialTheme.typography.labelLarge.merge(Numeric), color = freshnessColor(f))
+                    LiveStatus.LIVE -> Column(horizontalAlignment = Alignment.End) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            val f = c.freshness(now)
+                            LiveSignal(f)
+                            Spacer(Modifier.width(4.dp))
+                            Text(Fmt.relative(dep, now), style = MaterialTheme.typography.labelLarge.merge(Numeric), color = freshnessColor(f))
+                        }
+                        if (hurry(o)) Text("Hurry", style = MaterialTheme.typography.labelMedium, color = x.late, fontWeight = FontWeight.SemiBold)
                     }
                     LiveStatus.PASSED -> Text("Passed", style = MaterialTheme.typography.labelMedium, color = x.late)
                     else -> Text(Fmt.relative(dep, now), style = MaterialTheme.typography.labelLarge.merge(Numeric), color = x.subtle)

@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -158,6 +159,8 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
     private val rides = HashMap<String, List<Leg>>()
     /** When the current results were loaded, to refresh stale "leave now" searches. */
     private var searchedAt: Instant = Instant.EPOCH
+    /** Kept here, not in the screen, so coming back from a route's details keeps the scroll position. */
+    val listState = LazyListState()
     /** The endpoints of the current results, to tell a refresh from a new search. */
     private var searchedFrom: String? = null
     private var searchedTo: String? = null
@@ -250,6 +253,8 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
         searchedFrom = from.key
         searchedTo = to.key
         scope.launch {
+            // New results start at the top.
+            listState.scrollToItem(0)
             loading = true
             error = null
             itineraries = emptyList()
@@ -472,6 +477,7 @@ fun RoutesScreen(model: RoutesModel) {
                 MessageBox("No routes", body = model.error, action = "Try again", onAction = model::search)
             else -> LazyColumn(
                 Modifier.fillMaxSize().testTag("routes_list"),
+                state = model.listState,
                 contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp),
             ) {
                 item {

@@ -74,6 +74,10 @@ class TransitRepository(
 
     suspend fun nearbyStops(p: GeoPoint): List<Place> = transitous.nearbyStops(p)
 
+    /** Stops and stations matching [text], biased towards [near]. */
+    suspend fun searchStops(text: String, near: GeoPoint?): List<Place> =
+        transitous.geocode(text, near, language, type = "STOP").filter { it.kind == PlaceKind.STOP && it.stopId != null }
+
     // ---- Routing --------------------------------------------------------------------
 
     suspend fun plan(req: TransitousApi.PlanRequest): PlanResult = transitous.plan(req.copy(language = language))
@@ -105,6 +109,35 @@ class TransitRepository(
         val rides = transitous.plan(req).itineraries
             .mapNotNull { it.transitLegs.singleOrNull() }
             .filter { Combine.sameRide(it, leg) }
+        synchronized(rideCache) { rideCache[key] = rides }
+        return rides
+    }
+
+    /**
+     * The next direct rides (any line) between [leg]'s stops after it leaves: how long the wait
+     * is if it's missed. Looks up to an hour ahead; cached per ride.
+     */
+    suspend fun ridesAfter(leg: Leg, modes: Set<TransitMode>): List<Leg> {
+        val key = "after|${leg.from.stopId ?: leg.from.point}|${leg.to.stopId ?: leg.to.point}|${leg.start.epochSecond}"
+        synchronized(rideCache) { rideCache[key] }?.let { return it }
+        val req = TransitousApi.PlanRequest(
+            from = leg.from.point,
+            to = leg.to.point,
+            fromStopId = leg.from.stopId,
+            toStopId = leg.to.stopId,
+            time = leg.start.plusSeconds(60),
+            modes = modes,
+            maxWalkMinutes = 3,
+            maxTransfers = 0,
+            minTransferMinutes = 0,
+            additionalTransferMinutes = 0,
+            numItineraries = 5,
+            searchWindowSec = 60 * 60,
+            language = language,
+        )
+        val rides = transitous.plan(req).itineraries
+            .mapNotNull { it.transitLegs.singleOrNull() }
+            .let { Combine.ridesAfter(leg.copy(alternatives = emptyList()), it, count = 5) }
         synchronized(rideCache) { rideCache[key] = rides }
         return rides
     }

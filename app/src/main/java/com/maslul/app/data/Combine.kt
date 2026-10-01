@@ -91,7 +91,8 @@ object Combine {
      * alternatives on leg [legIndex], keeping only those that still fit the journey: after
      * the previous connection, in time for the next one, and not before [now]. Rides
      * scheduled up to [LATE_SEC] too early are kept too — a late bus may still be catchable,
-     * which [catchable] decides once live data is in.
+     * which [catchable] decides once live data is in — but only for a ride that's about to
+     * happen: a bus planned for tomorrow can't be running late yet.
      */
     fun addAlternatives(itin: Itinerary, legIndex: Int, rides: List<Leg>, now: Instant? = null): Itinerary {
         val leg = itin.legs.getOrNull(legIndex)?.takeIf { it.mode.isTransit } ?: return itin
@@ -108,11 +109,13 @@ object Combine {
         }
         val latestEnd = if (next >= 0) after[next].start.minusSeconds(after.take(next).sumOf { it.durationSec }) else null
         val latestStart = leg.start.plusSeconds(WINDOW_SEC)
+        val soon = now == null || !now.plusSeconds(LATE_SEC).isBefore(earliest)
+        val lateFrom = if (soon) earliest.minusSeconds(LATE_SEC) else earliest
 
         val perLine = leg.options.groupingBy(::lineKey).eachCount().toMutableMap()
         val added = rides
             .filter { sameRide(it, leg) && leg.options.none { o -> sameTrip(o, it) } }
-            .filter { !it.start.isBefore(earliest.minusSeconds(LATE_SEC)) && !it.start.isAfter(latestStart) }
+            .filter { !it.start.isBefore(lateFrom) && !it.start.isAfter(latestStart) }
             .filter { latestEnd == null || !it.end.isAfter(latestEnd) }
             .distinctBy { it.rideKey }
             .sortedBy { it.start }
@@ -122,6 +125,17 @@ object Combine {
         if (added.isEmpty()) return itin
         return withLeg(itin, legIndex, leg.copy(alternatives = leg.alternatives + added))
     }
+
+    /**
+     * Rides between the same two stops that leave after [leg] (any line), soonest first: what's
+     * left if it's missed. [found] adds rides looked up separately to the leg's own options.
+     */
+    fun ridesAfter(leg: Leg, found: List<Leg>, count: Int = 2): List<Leg> =
+        (leg.options + found)
+            .filter { sameRide(it, leg) && it.start.isAfter(leg.start) && !sameTrip(it, leg) }
+            .distinctBy { it.rideKey }
+            .sortedBy { it.start }
+            .take(count)
 
     /**
      * When you can be at leg [legIndex]'s boarding stop: [now] plus the walk there for the

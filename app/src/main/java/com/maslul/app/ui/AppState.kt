@@ -8,13 +8,14 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.ViewModel
 import com.maslul.app.MaslulApp
 import com.maslul.app.ui.lines.LinesHomeModel
+import com.maslul.app.ui.lines.StationsHomeModel
 import com.maslul.app.ui.nav.NavHomeModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 
-enum class Tab { NAVIGATE, LINES }
+enum class Tab { NAVIGATE, LINES, STATIONS }
 
 /** State holder for one screen on a back stack; lives until the screen is popped. */
 abstract class ScreenModel(val nav: AppNav) {
@@ -31,6 +32,7 @@ class AppNav : ViewModel() {
     private val stacks: Map<Tab, SnapshotStateList<ScreenModel>> = mapOf(
         Tab.NAVIGATE to mutableStateListOf(NavHomeModel(this)),
         Tab.LINES to mutableStateListOf(LinesHomeModel(this)),
+        Tab.STATIONS to mutableStateListOf(StationsHomeModel(this)),
     )
 
     /** Incremented on navigation so transitions know the direction. */

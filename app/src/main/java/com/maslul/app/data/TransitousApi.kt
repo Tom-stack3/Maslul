@@ -77,11 +77,13 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
         return dto.legs.firstOrNull { it.mode != "WALK" }?.toDomain()
     }
 
-    suspend fun geocode(text: String, near: GeoPoint?, language: String? = null): List<Place> {
+    /** Place search; [type] ("STOP", "ADDRESS" or "PLACE") limits the kind of results. */
+    suspend fun geocode(text: String, near: GeoPoint?, language: String? = null, type: String? = null): List<Place> {
         val url = base.toHttpUrl().newBuilder()
             .addPathSegments("api/v1/geocode")
             .addQueryParameter("text", text)
             .apply {
+                type?.let { addQueryParameter("type", it) }
                 near?.let {
                     addQueryParameter("place", "${it.lat},${it.lon}")
                     addQueryParameter("placeBias", "1")

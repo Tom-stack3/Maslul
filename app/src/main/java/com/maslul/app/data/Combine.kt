@@ -23,6 +23,8 @@ object Combine {
     const val LATE_SEC = TransitRepository.LATE_WINDOW_SEC
     /** Leeway when judging whether a bus can still be caught. */
     private const val CATCH_SLACK_SEC = 90L
+    /** Hurrying (a brisk walk or a jog) covers a walk in this share of its time. */
+    private const val HURRY_SHARE = 0.5
 
     fun sameStop(a: StopCall, b: StopCall): Boolean {
         if (a.stopId != null && a.stopId == b.stopId) return true
@@ -141,10 +143,10 @@ object Combine {
      * When you can be at leg [legIndex]'s boarding stop: [now] plus the walk there for the
      * first ride, else when the previous ride gets in plus the walk between.
      */
-    fun reachBy(itin: Itinerary, legIndex: Int, now: Instant): Instant {
+    fun reachBy(itin: Itinerary, legIndex: Int, now: Instant, hurry: Boolean = false): Instant {
         val before = itin.legs.subList(0, legIndex.coerceIn(0, itin.legs.size))
         val prev = before.indexOfLast { it.mode.isTransit }
-        val walk = before.drop(prev + 1).sumOf { it.durationSec }
+        val walk = before.drop(prev + 1).sumOf { it.durationSec }.let { if (hurry) (it * HURRY_SHARE).toLong() else it }
         return (if (prev >= 0) maxOf(before[prev].end, now) else now).plusSeconds(walk)
     }
 
@@ -170,11 +172,26 @@ object Combine {
         return !boards(option, call).isBefore(reachBy.minusSeconds(CATCH_SLACK_SEC))
     }
 
-    /** Leg [legIndex]'s options that can still be caught, soonest first. */
-    fun catchableOptions(itin: Itinerary, legIndex: Int, now: Instant, liveOf: (Leg) -> LiveCall?): List<Leg> {
+    /**
+     * Whether [option] can be caught only by hurrying to the stop: it's tracked live and hasn't
+     * passed, and it comes before you'd walk there but not before you could hurry there.
+     */
+    fun onlyByHurrying(itin: Itinerary, legIndex: Int, option: Leg, now: Instant, call: LiveCall?): Boolean {
+        if (call?.status != LiveStatus.LIVE || catchable(option, call, reachBy(itin, legIndex, now))) return false
+        return !boards(option, call).isBefore(reachBy(itin, legIndex, now, hurry = true).minusSeconds(CATCH_SLACK_SEC))
+    }
+
+    /**
+     * Leg [legIndex]'s options that can still be caught, soonest first. With [hurry], also live
+     * buses you'd catch only by hurrying ([onlyByHurrying]): worth showing, so you can run for
+     * one you see is close, but not planned on.
+     */
+    fun catchableOptions(itin: Itinerary, legIndex: Int, now: Instant, hurry: Boolean = false, liveOf: (Leg) -> LiveCall?): List<Leg> {
         val leg = itin.legs.getOrNull(legIndex)?.takeIf { it.mode.isTransit } ?: return emptyList()
         val by = reachBy(itin, legIndex, now)
-        return leg.options.filter { catchable(it, liveOf(it), by) }.sortedBy { boards(it, liveOf(it)) }
+        return leg.options
+            .filter { catchable(it, liveOf(it), by) || (hurry && onlyByHurrying(itin, legIndex, it, now, liveOf(it))) }
+            .sortedBy { boards(it, liveOf(it)) }
     }
 
     /**
@@ -183,7 +200,7 @@ object Combine {
      */
     fun bestOption(itin: Itinerary, legIndex: Int, now: Instant, liveOf: (Leg) -> LiveCall?): Leg? {
         val leg = itin.legs.getOrNull(legIndex)?.takeIf { it.mode.isTransit } ?: return null
-        val best = catchableOptions(itin, legIndex, now, liveOf)
+        val best = catchableOptions(itin, legIndex, now, liveOf = liveOf)
             .minWithOrNull(compareBy<Leg>({ arrives(it, liveOf(it)) }, { boards(it, liveOf(it)) })) ?: return null
         return best.takeIf { it.rideKey != leg.rideKey }
     }

@@ -594,10 +594,13 @@ private fun TransitSegment(model: RouteDetailModel, index: Int, leg: Leg, rail: 
     var open by remember { mutableStateOf(false) }
     TimelineRow(rail, rail, Node.NONE, Color.Transparent) {
         Spacer(Modifier.height(6.dp))
-        val options = Combine.catchableOptions(model.itinerary, index, now) { model.rideLive[it.rideKey] }
+        val liveOf = { o: Leg -> model.rideLive[o.rideKey] }
+        val options = Combine.catchableOptions(model.itinerary, index, now, hurry = true, liveOf = liveOf)
             .let { o -> if (o.none { it.rideKey == leg.rideKey }) o + leg else o }
         if (options.size > 1) {
-            LineOptions(leg, options, now, model.rideLive) { model.choose(index, it) }
+            LineOptions(leg, options, now, model.rideLive, hurry = { Combine.onlyByHurrying(model.itinerary, index, it, now, liveOf(it)) }) {
+                model.choose(index, it)
+            }
             Spacer(Modifier.height(8.dp))
         }
         Row(
@@ -689,7 +692,15 @@ private fun MissedRides(leg: Leg, rides: List<Leg>, modifier: Modifier = Modifie
  * (live when tracked). Tapping one rides it: the timeline and map follow the pick.
  */
 @Composable
-private fun LineOptions(leg: Leg, rides: List<Leg>, now: Instant, rideLive: Map<String, LiveCall>, onChoose: (Leg) -> Unit) {
+private fun LineOptions(
+    leg: Leg,
+    rides: List<Leg>,
+    now: Instant,
+    rideLive: Map<String, LiveCall>,
+    /** Buses you'd only catch by hurrying to the stop. */
+    hurry: (Leg) -> Boolean,
+    onChoose: (Leg) -> Unit,
+) {
     val x = LocalExtra.current
     val options = rides.map { it to rideLive[it.rideKey] }.sortedBy { (o, c) -> Combine.boards(o, c) }
     val lines = options.distinctBy { Combine.lineKey(it.first) }.size
@@ -730,11 +741,14 @@ private fun LineOptions(leg: Leg, rides: List<Leg>, now: Instant, rideLive: Map<
                 }
                 Spacer(Modifier.width(6.dp))
                 when (c?.status) {
-                    LiveStatus.LIVE -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        val f = c.freshness(now)
-                        LiveSignal(f)
-                        Spacer(Modifier.width(4.dp))
-                        Text(Fmt.relative(dep, now), style = MaterialTheme.typography.labelLarge.merge(Numeric), color = freshnessColor(f))
+                    LiveStatus.LIVE -> Column(horizontalAlignment = Alignment.End) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            val f = c.freshness(now)
+                            LiveSignal(f)
+                            Spacer(Modifier.width(4.dp))
+                            Text(Fmt.relative(dep, now), style = MaterialTheme.typography.labelLarge.merge(Numeric), color = freshnessColor(f))
+                        }
+                        if (hurry(o)) Text("Hurry", style = MaterialTheme.typography.labelMedium, color = x.late, fontWeight = FontWeight.SemiBold)
                     }
                     LiveStatus.PASSED -> Text("Passed", style = MaterialTheme.typography.labelMedium, color = x.late)
                     else -> Text(Fmt.relative(dep, now), style = MaterialTheme.typography.labelLarge.merge(Numeric), color = x.subtle)

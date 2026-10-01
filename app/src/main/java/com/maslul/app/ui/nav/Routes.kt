@@ -158,6 +158,9 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
     private val rides = HashMap<String, List<Leg>>()
     /** When the current results were loaded, to refresh stale "leave now" searches. */
     private var searchedAt: Instant = Instant.EPOCH
+    /** The endpoints of the current results, to tell a refresh from a new search. */
+    private var searchedFrom: String? = null
+    private var searchedTo: String? = null
 
     init { search() }
 
@@ -230,7 +233,22 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
         )
     }
 
+    /** A refreshed "leave now" search keeps options whose live first bus can still be caught, if only by hurrying. */
+    private fun stillCatchable(now: Instant): List<Itinerary> {
+        if (timeMode != TimeMode.NOW) return emptyList()
+        return itineraries.filter { itin ->
+            val first = itin.firstTransit ?: return@filter false
+            val i = itin.legs.indexOf(first)
+            Combine.onlyByHurrying(itin, i, first, now, rideLive[first.rideKey])
+        }
+    }
+
     fun search() {
+        // Same trip, leaving now: a bus you could still run for shouldn't vanish on refresh.
+        val keep = if (from.key == searchedFrom && to.key == searchedTo) stillCatchable(Instant.now()) else emptyList()
+        val keptLive = keep.mapNotNull { it.firstTransit?.rideKey }.associateWith { rideLive[it] }
+        searchedFrom = from.key
+        searchedTo = to.key
         scope.launch {
             loading = true
             error = null
@@ -248,9 +266,11 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
                 loading = false
                 return@launch
             }
+            keptLive.forEach { (k, c) -> if (c != null) rideLive[k] = c }
             runCatching { planWithRail() }
                 .onSuccess { r ->
-                    raw = r.itineraries
+                    val ids = r.itineraries.map { it.id }.toSet()
+                    raw = r.itineraries + keep.filter { it.id !in ids }
                     itineraries = ranked(raw)
                     walkOnly = r.walkOnly?.takeIf { it.durationSec < 45 * 60 }
                     nextCursor = r.nextCursor
@@ -381,7 +401,12 @@ fun RoutesScreen(model: RoutesModel) {
     // Coming back to a "leave now" search after a while re-runs it.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
-        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) model.refreshIfStale() }
+        // Adding the observer replays ON_RESUME at once (e.g. coming back from a route's details);
+        // only a real resume, such as returning to the app, should refresh.
+        var replayed = false
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_RESUME) { if (replayed) model.refreshIfStale() else replayed = true }
+        }
         lifecycle.addObserver(obs)
         onDispose { lifecycle.removeObserver(obs) }
     }
@@ -621,13 +646,16 @@ fun ItineraryCard(
                         color = x.subtle,
                     )
                 }
-                LeaveIn(leaveAt, now, live.freshness(now))
+                // The planned bus is live and close: you'd only make it by hurrying, so say so instead of "Missed".
+                val hurry = first != null && Combine.onlyByHurrying(itin, itin.legs.indexOf(first), first, now, live)
+                LeaveIn(leaveAt, now, live.freshness(now), hurry)
             }
             Spacer(Modifier.height(12.dp))
             val liveOf: (Leg) -> LiveCall? = { o -> if (o.rideKey == first?.rideKey) live else rideLive[o.rideKey] }
-            // Buses that can still be caught on each ride (other lines, the next ones, a late earlier one).
+            // Buses that can still be caught on each ride (other lines, the next ones, a late earlier one),
+            // including a live one that's close enough to run for.
             val choices = itin.legs.withIndex().filter { it.value.mode.isTransit }
-                .associate { (i, l) -> l.rideKey to Combine.catchableOptions(itin, i, now, liveOf).ifEmpty { listOf(l) } }
+                .associate { (i, l) -> l.rideKey to Combine.catchableOptions(itin, i, now, hurry = true, liveOf = liveOf).ifEmpty { listOf(l) } }
             val lineCount = { l: Leg -> choices[l.rideKey].orEmpty().distinctBy { Combine.lineKey(it) }.size }
             FlowRow(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -660,7 +688,10 @@ fun ItineraryCard(
             }
             strips.forEach { leg ->
                 Spacer(Modifier.height(if (leg === first) 12.dp else 8.dp))
-                RideOptions(leg, choices[leg.rideKey].orEmpty(), now, relative = leg === first, liveOf)
+                val i = itin.legs.indexOf(leg)
+                RideOptions(leg, choices[leg.rideKey].orEmpty(), now, relative = leg === first, liveOf) { o ->
+                    Combine.onlyByHurrying(itin, i, o, now, liveOf(o))
+                }
             }
             if (risk != null) {
                 Spacer(Modifier.height(8.dp))
@@ -691,11 +722,19 @@ fun CombinedBadges(rides: List<Leg>) {
 
 /**
  * Compact next departures of every line in a combined ride:
- * "From Stop · [16] 4 min  [92] 7 min  [5] 12 min", live ones marked.
+ * "From Stop · [16] 4 min  [92] 7 min  [5] 12 min", live ones marked, and those you'd only
+ * catch by hurrying marked "Hurry".
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun RideOptions(leg: Leg, rides: List<Leg>, now: Instant, relative: Boolean, liveOf: (Leg) -> LiveCall?) {
+fun RideOptions(
+    leg: Leg,
+    rides: List<Leg>,
+    now: Instant,
+    relative: Boolean,
+    liveOf: (Leg) -> LiveCall?,
+    hurry: (Leg) -> Boolean = { false },
+) {
     val x = LocalExtra.current
     val perLine = HashMap<String, Int>()
     val options = rides.map { it to liveOf(it) }.sortedBy { (o, c) -> Combine.boards(o, c) }
@@ -724,6 +763,10 @@ fun RideOptions(leg: Leg, rides: List<Leg>, now: Instant, relative: Boolean, liv
                         style = MaterialTheme.typography.labelLarge.merge(Numeric),
                         color = if (isLive) freshnessColor(f) else MaterialTheme.colorScheme.onSurface,
                     )
+                    if (hurry(o)) {
+                        Spacer(Modifier.width(4.dp))
+                        Text("Hurry", style = MaterialTheme.typography.labelMedium, color = x.late, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
         }
@@ -759,10 +802,13 @@ fun TransferWarning(t: Ranking.Transfer, missed: Leg? = null, modifier: Modifier
 }
 
 @Composable
-private fun LeaveIn(leaveAt: Instant, now: Instant, freshness: Freshness) {
+private fun LeaveIn(leaveAt: Instant, now: Instant, freshness: Freshness, hurry: Boolean = false) {
     val min = (leaveAt.epochSecond - now.epochSecond + 30) / 60
     Column(horizontalAlignment = Alignment.End) {
-        if (min <= 0 && min > -2) {
+        if (hurry && min <= 0) {
+            Text("Hurry", style = MaterialTheme.typography.titleMedium, color = LocalExtra.current.late)
+            Text("bus is close", style = MaterialTheme.typography.labelSmall, color = LocalExtra.current.subtle)
+        } else if (min <= 0 && min > -2) {
             Text("Go now", style = MaterialTheme.typography.titleMedium, color = LocalExtra.current.live)
         } else if (min in 1..90) {
             Text("leave in", style = MaterialTheme.typography.labelSmall, color = LocalExtra.current.subtle)

@@ -232,4 +232,18 @@ class CombineTest {
         val soon = Combine.addAlternatives(planned, 1, listOf(earlier), now = at(-20))
         assertEquals(listOf("trip-16-2", "trip-16-12"), soon.legs[1].options.map { it.tripId })
     }
+
+    @Test
+    fun liveBusYouCouldHurryForIsShownButNotPlannedOn() {
+        // 3-minute walk to the stop; it's min 9, so you'd stroll there by min 12.
+        val itin = direct("16", 12, 30)
+        val bus = itin.legs[1]
+        val close = mapOf(bus.rideKey to liveAt(bus, 10)) // live: at the stop at min 10
+        assertTrue(Combine.onlyByHurrying(itin, 1, bus, at(9), close[bus.rideKey]))
+        assertEquals(emptyList<Leg>(), Combine.catchableOptions(itin, 1, at(9)) { close[it.rideKey] })
+        assertEquals(listOf(bus.rideKey), Combine.catchableOptions(itin, 1, at(9), hurry = true) { close[it.rideKey] }.map { it.rideKey })
+        // Too close to make even hurrying, or only on the timetable: not offered.
+        assertFalse(Combine.onlyByHurrying(itin, 1, bus, at(9), liveAt(bus, 8)))
+        assertFalse(Combine.onlyByHurrying(itin, 1, bus, at(11), null))
+    }
 }

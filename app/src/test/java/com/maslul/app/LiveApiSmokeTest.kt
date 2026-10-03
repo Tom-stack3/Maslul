@@ -3,14 +3,20 @@ package com.maslul.app
 import com.maslul.app.data.GeoMath
 import com.maslul.app.data.GeoPoint
 import com.maslul.app.data.IsraelZone
+import com.maslul.app.data.Leg
 import com.maslul.app.data.LiveStatus
 import com.maslul.app.data.Ranking
+import com.maslul.app.data.StopCall
 import com.maslul.app.data.TransitMode
 import com.maslul.app.data.TransitRepository
 import com.maslul.app.data.TransitousApi
+import com.maslul.app.data.TripIds
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertFalse
+import org.junit.Assume
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 import java.time.LocalDate
 
 /**
@@ -147,5 +153,24 @@ class LiveApiSmokeTest {
         val late = board.count { it.live?.status == LiveStatus.LIVE && it.departure.scheduled.isBefore(java.time.Instant.now()) }
         println("${stops.first().name}: ${board.size} departures, live=${board.count { it.live?.status == LiveStatus.LIVE }}, late earlier trips=$late")
         board.take(5).forEach { println("  ${it.departure.lineLabel} → ${it.departure.headsign} ${it.live?.status} ${it.live?.best}") }
+    }
+
+    @Test
+    fun lateBusWhoseSlotIsLongGoneStillGetsALiveLookup() = runBlocking {
+        // Any vehicle on the road whose trip set off a while ago: boarding it at its first stop
+        // was due long before now, yet it's worth a live lookup. A trip of a line with nothing on the road isn't.
+        val now = Instant.now()
+        val repo = TransitRepository()
+        val v = repo.live.snapshot()?.byLine?.values?.flatten()
+            ?.firstOrNull { it.journeyRef != null && it.originDeparture.isBefore(now.minusSeconds(20 * 60)) && it.originDeparture.isAfter(now.minusSeconds(80 * 60)) }
+        Assume.assumeNotNull(v) // e.g. on Shabbat
+        val stop = StopCall("s", "S", null, v!!.lat, v.lon, null, null)
+        fun ride(journeyRef: String, lineRef: String = v.lineRef) = Leg(
+            TransitMode.BUS, stop, stop, v.originDeparture, v.originDeparture.plusSeconds(300), null, null, "1", null, null, null, null,
+            TripIds.build(v.originDeparture.atZone(IsraelZone).toLocalDate(), v.originDeparture, journeyRef), "il-Israel-MOT_$lineRef",
+            emptyList(), emptyList(),
+        )
+        assertTrue(repo.worthLive(ride(v.journeyRef!!), now))
+        assertFalse(repo.worthLive(ride("1", lineRef = "999999999"), now))
     }
 }

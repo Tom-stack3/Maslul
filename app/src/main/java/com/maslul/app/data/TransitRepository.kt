@@ -163,6 +163,20 @@ class TransitRepository(
         return LiveCalls.compute(timeline, origin, board, alight, v, now)
     }
 
+    /**
+     * Whether [leg] is worth a live lookup at [now]: it hasn't finished on the timetable
+     * (with [graceSec] leeway), or it's scheduled within the late window and its vehicle is on
+     * the road — a bus running late whose timetable slot is long gone. Only reads the
+     * snapshot, so it's cheap to ask for every late candidate.
+     */
+    suspend fun worthLive(leg: Leg, now: Instant, graceSec: Long = 0): Boolean {
+        if (leg.end.isAfter(now.minusSeconds(graceSec))) return true
+        if (leg.start.isBefore(now.minusSeconds(LATE_WINDOW_SEC))) return false
+        val parsed = TripIds.parse(leg.tripId) ?: return false
+        val vehicles = leg.lineRef?.let { live.vehiclesForLine(it) }.orEmpty()
+        return vehicles.forTrip(parsed.tripNumber, parsed.originDeparture) != null
+    }
+
     /** Route and stops from a live vehicle up to [leg]'s boarding stop, so the bus isn't drawn floating. */
     suspend fun approach(leg: Leg, call: LiveCall): LiveApproach? {
         val p = call.progress?.takeIf { call.status == LiveStatus.LIVE } ?: return null

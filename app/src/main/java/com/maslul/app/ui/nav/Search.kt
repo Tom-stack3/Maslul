@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -218,7 +219,11 @@ fun SearchScreen(model: SearchModel) {
         }
         if (model.loading) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp)) else Spacer(Modifier.height(2.dp))
 
-        LazyColumn(Modifier.fillMaxSize()) {
+        // New results replace the list, so show them from the top: by default the list keeps the
+        // row it showed in place, and a better match added above it would sit unseen off-screen.
+        val listState = rememberLazyListState()
+        LaunchedEffect(model.results) { listState.scrollToItem(0) }
+        LazyColumn(Modifier.fillMaxSize().testTag("search_results"), state = listState) {
             val q = model.query
             if (q.length >= 2) {
                 if (model.failed) item { MessageBox("Couldn't search", body = "Check your connection and try again.") }

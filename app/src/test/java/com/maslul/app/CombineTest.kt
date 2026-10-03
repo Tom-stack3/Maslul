@@ -208,6 +208,51 @@ class CombineTest {
         assertEquals(listOf(12, 14, 18).map { at(it) }, leg.options.map { it.start })
     }
 
+    /**
+     * The 18 runs every 12 min and the planner's first is at min 102. The one due at min 66 is
+     * running 28 min late and comes at min 94, just as you reach the stop. Older 18s, 25s and 40s
+     * from the last hour and a half must not crowd it out of the candidates.
+     */
+    @Test
+    fun keepsTheMostRecentLateCandidatesNotTheOldest() {
+        val planned = direct("18", 102, 107)
+        val found = listOf(30, 42, 54, 66, 78, 90, 102, 114).map { bus("18", "A", 0.2, "B", 5.0, it, it + 5) } +
+            listOf(34, 49, 64, 79, 94).map { bus("25", "A", 0.2, "B", 5.0, it, it + 5) } +
+            listOf(27, 47, 67, 87).map { bus("40", "A", 0.2, "B", 5.0, it, it + 5) }
+        val itin = Combine.addAlternatives(planned, 1, found, now = at(92))
+        assertTrue("trip-18-66" in itin.legs[1].options.map { it.tripId })
+        // Live: the min-66 bus reaches the stop at 94; the planned one is 8 min late.
+        val late = itin.legs[1].options.first { it.tripId == "trip-18-66" }
+        val live = mapOf(late.rideKey to liveAt(late, 94), planned.legs[1].rideKey to liveAt(planned.legs[1], 110))
+        assertEquals("trip-18-66", Combine.pickBest(itin, at(92), { live[it.rideKey] }).legs[1].tripId)
+        // The upcoming ones are still the next few, soonest first.
+        assertTrue("trip-18-114" in itin.legs[1].options.map { it.tripId })
+    }
+
+    /**
+     * The walk the planner works out from the rider's position makes it pick the min-54 tram, but
+     * the min-45 one is still catchable on the timetable alone. Trams every 9 min over the last hour
+     * and a half must not crowd it out.
+     */
+    @Test
+    fun offersTheEarlierTramStillCatchableOnTheTimetable() {
+        val tram = { start: Int -> bus("T", "A", 0.0, "B", 9.0, start, start + 17) }
+        val planned = itin("t@54", walk(0.0, 0.0, 47, 54), tram(54), walk(9.0, 9.4, 71, 78))
+        val found = (-45..63 step 9).map(tram)
+        val itin = Combine.addAlternatives(planned, 1, found, now = at(39))
+        assertEquals(listOf(at(45), at(54)), Combine.catchableOptions(itin, 1, at(39)) { null }.take(2).map { it.start })
+        assertEquals("trip-T-45", Combine.pickBest(itin, at(39), { null }).legs[1].tripId)
+    }
+
+    @Test
+    fun lateCandidatesArePerLineAndMostRecentFirst() {
+        val planned = direct("16", 100, 105)
+        val found = (10..90 step 10).map { bus("16", "A", 0.2, "B", 5.0, it, it + 5) }
+        val late = Combine.addAlternatives(planned, 1, found, now = at(90)).legs[1].alternatives.map { it.start }
+        assertEquals((40..90 step 10).map { at(it) }, late)
+        assertEquals(Combine.LATE_PER_LINE, late.size)
+    }
+
     @Test
     fun ridesAfterListsLaterRidesOfAnyLineOnTheSameHop() {
         val leg = direct("16", 12, 30).legs[1].copy(alternatives = listOf(bus("16", "A", 0.2, "B", 5.0, 8, 26)))

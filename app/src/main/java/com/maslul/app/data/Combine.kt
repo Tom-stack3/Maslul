@@ -21,6 +21,8 @@ object Combine {
     const val PER_LINE = 3
     /** Earlier-scheduled rides are kept as candidates this far back: they may be running late. */
     const val LATE_SEC = TransitRepository.LATE_WINDOW_SEC
+    /** Earlier-scheduled rides of one line kept as late candidates (the most recent ones). */
+    const val LATE_PER_LINE = 6
     /** Leeway when judging whether a bus can still be caught. */
     private const val CATCH_SLACK_SEC = 90L
     /** Hurrying (a brisk walk or a jog) covers a walk in this share of its time. */
@@ -92,9 +94,10 @@ object Combine {
      * Adds rides from [rides] (direct rides found between the leg's two stops) as
      * alternatives on leg [legIndex], keeping only those that still fit the journey: after
      * the previous connection, in time for the next one, and not before [now]. Rides
-     * scheduled up to [LATE_SEC] too early are kept too — a late bus may still be catchable,
-     * which [catchable] decides once live data is in — but only for a ride that's about to
-     * happen: a bus planned for tomorrow can't be running late yet.
+     * scheduled up to [LATE_SEC] too early are kept too (the latest [LATE_PER_LINE] of each
+     * line) — a late bus may still be catchable, which [catchable] decides once live data is
+     * in — but only for a ride that's about to happen: a bus planned for tomorrow can't be
+     * running late yet.
      */
     fun addAlternatives(itin: Itinerary, legIndex: Int, rides: List<Leg>, now: Instant? = null): Itinerary {
         val leg = itin.legs.getOrNull(legIndex)?.takeIf { it.mode.isTransit } ?: return itin
@@ -114,16 +117,23 @@ object Combine {
         val soon = now == null || !now.plusSeconds(LATE_SEC).isBefore(earliest)
         val lateFrom = if (soon) earliest.minusSeconds(LATE_SEC) else earliest
 
-        val perLine = leg.options.groupingBy(::lineKey).eachCount().toMutableMap()
-        val added = rides
+        val candidates = rides
             .filter { sameRide(it, leg) && leg.options.none { o -> sameTrip(o, it) } }
             .filter { !it.start.isBefore(lateFrom) && !it.start.isAfter(latestStart) }
             .filter { latestEnd == null || !it.end.isAfter(latestEnd) }
             .distinctBy { it.rideKey }
-            .sortedBy { it.start }
+        val (late, upcoming) = candidates.partition { it.start.isBefore(earliest) }
+        // The next few of each line, soonest first.
+        val perLine = leg.options.groupingBy(::lineKey).eachCount().toMutableMap()
+        val soonest = upcoming.sortedBy { it.start }
             .filter { o -> (perLine[lineKey(o)] ?: 0).let { n -> if (n < PER_LINE) { perLine[lineKey(o)] = n + 1; true } else false } }
-            .map { it.copy(alternatives = emptyList()) }
             .take((MAX_ALTERNATIVES - leg.alternatives.size).coerceAtLeast(0))
+        // Possibly-late ones, most recent first: the one due just before you get there is the likeliest
+        // to still come, not one from an hour and a half ago. [catchable] decides which are offered.
+        val latePerLine = HashMap<String, Int>()
+        val recent = late.sortedByDescending { it.start }
+            .filter { o -> latePerLine.merge(lineKey(o), 1, Int::plus)!! <= LATE_PER_LINE }
+        val added = (soonest + recent).sortedBy { it.start }.map { it.copy(alternatives = emptyList()) }
         if (added.isEmpty()) return itin
         return withLeg(itin, legIndex, leg.copy(alternatives = leg.alternatives + added))
     }

@@ -333,9 +333,9 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             // so each card can show — and take — whichever comes first.
             itineraries.flatMap { it.transitLegs }
                 .flatMap { it.options }
-                .filter { it.start.isBefore(now.plusSeconds(90 * 60)) && it.end.isAfter(now) }
+                .filter { it.start.isBefore(now.plusSeconds(90 * 60)) }
                 .distinctBy { it.rideKey }
-                .map { it to async { runCatching { repo.legLive(it, now) }.getOrNull() } }
+                .map { it to async { runCatching { if (repo.worthLive(it, now)) repo.legLive(it, now) else null }.getOrNull() } }
                 .forEach { (l, d) -> d.await()?.let { c -> rideLive[l.rideKey] = c } }
         }
         // Leaving now: ride the bus that gets there first rather than the timetable's pick.
@@ -654,7 +654,7 @@ fun ItineraryCard(
                 }
                 // The planned bus is live and close: you'd only make it by hurrying, so say so instead of "Missed".
                 val hurry = first != null && Combine.onlyByHurrying(itin, itin.legs.indexOf(first), first, now, live)
-                LeaveIn(leaveAt, now, live.freshness(now), hurry)
+                LeaveIn(leaveAt, now, live.freshness(now), hurry, first?.mode ?: TransitMode.BUS)
             }
             Spacer(Modifier.height(12.dp))
             val liveOf: (Leg) -> LiveCall? = { o -> if (o.rideKey == first?.rideKey) live else rideLive[o.rideKey] }
@@ -751,7 +751,7 @@ fun RideOptions(
             .padding(horizontal = 12.dp, vertical = 9.dp),
     ) {
         Text(
-            (if (lines > 1) "$lines lines" else "Next buses") + " from ${leg.from.name}",
+            (if (lines > 1) "$lines lines" else "Next ${TransitMode.vehiclesOf(options.map { it.first })}") + " from ${leg.from.name}",
             style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.height(6.dp))
@@ -808,12 +808,12 @@ fun TransferWarning(t: Ranking.Transfer, missed: Leg? = null, modifier: Modifier
 }
 
 @Composable
-private fun LeaveIn(leaveAt: Instant, now: Instant, freshness: Freshness, hurry: Boolean = false) {
+private fun LeaveIn(leaveAt: Instant, now: Instant, freshness: Freshness, hurry: Boolean = false, mode: TransitMode = TransitMode.BUS) {
     val min = (leaveAt.epochSecond - now.epochSecond + 30) / 60
     Column(horizontalAlignment = Alignment.End) {
         if (hurry && min <= 0) {
             Text("Hurry", style = MaterialTheme.typography.titleMedium, color = LocalExtra.current.late)
-            Text("bus is close", style = MaterialTheme.typography.labelSmall, color = LocalExtra.current.subtle)
+            Text("${mode.vehicle} is close", style = MaterialTheme.typography.labelSmall, color = LocalExtra.current.subtle)
         } else if (min <= 0 && min > -2) {
             Text("Go now", style = MaterialTheme.typography.titleMedium, color = LocalExtra.current.live)
         } else if (min in 1..90) {

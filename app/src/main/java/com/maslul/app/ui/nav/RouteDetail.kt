@@ -187,9 +187,10 @@ class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: P
             itinerary.legs.forEachIndexed { i, chosen ->
                 if (!chosen.mode.isTransit) return@forEachIndexed
                 // Every line of a combined leg, so their buses and arrivals can be compared.
-                chosen.options.filter { it.end.isAfter(now.minusSeconds(300)) }.forEach { leg ->
+                chosen.options.forEach { leg ->
                     scope.launch {
-                        val call = runCatching { repo.legLive(leg, now) }.getOrNull() ?: return@launch
+                        val call = runCatching { if (repo.worthLive(leg, now, graceSec = 300)) repo.legLive(leg, now) else null }
+                            .getOrNull() ?: return@launch
                         rideLive[leg.rideKey] = call
                         if (leg.rideKey == itinerary.legs.getOrNull(i)?.rideKey) updateApproach(i, leg, call)
                         pickBest()
@@ -704,8 +705,9 @@ private fun LineOptions(
     val x = LocalExtra.current
     val options = rides.map { it to rideLive[it.rideKey] }.sortedBy { (o, c) -> Combine.boards(o, c) }
     val lines = options.distinctBy { Combine.lineKey(it.first) }.size
+    val vehicles = TransitMode.vehiclesOf(options.map { it.first })
     Text(
-        (if (lines > 1) "${options.size} buses ride this way" else "Next ${options.size} buses of ${leg.lineLabel}") + " · tap to choose",
+        (if (lines > 1) "${options.size} $vehicles go this way" else "Next ${options.size} $vehicles of ${leg.lineLabel}") + " · tap to choose",
         style = MaterialTheme.typography.labelMedium, color = x.subtle,
     )
     Spacer(Modifier.height(6.dp))

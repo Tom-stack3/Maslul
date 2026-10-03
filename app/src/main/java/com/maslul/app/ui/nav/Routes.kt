@@ -100,6 +100,7 @@ import com.maslul.app.data.Place
 import com.maslul.app.data.PlaceKind
 import com.maslul.app.data.RailPreference
 import com.maslul.app.data.Ranking
+import com.maslul.app.data.Settings
 import com.maslul.app.data.SavedTrip
 import com.maslul.app.data.TransitMode
 import com.maslul.app.data.TransitRepository
@@ -333,13 +334,18 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             // so each card can show — and take — whichever comes first.
             itineraries.flatMap { it.transitLegs }
                 .flatMap { it.options }
-                .filter { it.start.isBefore(now.plusSeconds(90 * 60)) && it.end.isAfter(now) }
+                .filter { it.start.isBefore(now.plusSeconds(90 * 60)) }
                 .distinctBy { it.rideKey }
-                .map { it to async { runCatching { repo.legLive(it, now) }.getOrNull() } }
+                .map { it to async { runCatching { if (repo.worthLive(it, now)) repo.legLive(it, now) else null }.getOrNull() } }
                 .forEach { (l, d) -> d.await()?.let { c -> rideLive[l.rideKey] = c } }
         }
-        // Leaving now: ride the bus that gets there first rather than the timetable's pick.
-        if (timeMode == TimeMode.NOW) itineraries = itineraries.map { Combine.pickBest(it, now, { l -> rideLive[l.rideKey] }) }
+        // Leaving now: ride the bus that gets there first rather than the timetable's pick, and rank
+        // by when the options are expected to get there (a late bus can turn the best into the worst).
+        if (timeMode == TimeMode.NOW) {
+            val liveOf = { l: Leg -> rideLive[l.rideKey] }
+            itineraries = Combine.distinctRides(itineraries.map { Combine.pickBest(it, now, liveOf) })
+                .sortedBy { Ranking.score(Combine.expected(it, liveOf), false, walkMps, rail) }
+        }
         itineraries.forEach { itin -> itin.firstTransit?.let { rideLive[it.rideKey] }?.let { live[itin.id] = it } }
     }
 
@@ -355,6 +361,11 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
         timeMode = TimeMode.NOW
         time = null
         search()
+    }
+
+    /** Searches again only if the options sheet changed something: closing it untouched keeps the routes. */
+    fun optionsClosed(before: Settings) {
+        if (store.data.value.settings != before) search()
     }
 
     fun refreshIfStale() {
@@ -399,7 +410,8 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
 fun RoutesScreen(model: RoutesModel) {
     val data by model.store.data.collectAsState()
     var showTime by remember { mutableStateOf(false) }
-    var showOptions by remember { mutableStateOf(false) }
+    /** The options as they were when the sheet opened (null while it's closed). */
+    var optionsBefore by remember { mutableStateOf<Settings?>(null) }
     var now by remember { mutableStateOf(Instant.now()) }
     LaunchedEffect(Unit) { model.liveLoop() }
     LaunchedEffect(Unit) { while (true) { delay(15_000); now = Instant.now() } }
@@ -416,8 +428,12 @@ fun RoutesScreen(model: RoutesModel) {
         onDispose { lifecycle.removeObserver(obs) }
     }
 
-    val fastest = model.itineraries.minByOrNull { it.durationSec }?.id
-    val leastWalk = model.itineraries.takeIf { it.size > 2 }?.minByOrNull { it.walkSec }?.id
+    val expectedOf = { itin: Itinerary -> Combine.expected(itin) { model.rideLive[it.rideKey] } }
+    // Leaving now: options whose connection a late bus has made impossible aren't options (unless nothing else is left).
+    val itineraries = if (model.timeMode != TimeMode.NOW) model.itineraries
+        else model.itineraries.filter { Combine.connects(it, now) { l -> model.rideLive[l.rideKey] } }.ifEmpty { model.itineraries }
+    val fastest = itineraries.minByOrNull { expectedOf(it).durationSec }?.id
+    val leastWalk = itineraries.takeIf { it.size > 2 }?.minByOrNull { it.walkSec }?.id
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 2.dp) {
@@ -455,12 +471,12 @@ fun RoutesScreen(model: RoutesModel) {
                             s.walkSpeed != WalkSpeed.NORMAL || s.railPreference != RailPreference.NONE
                         FilterChip(
                             selected = custom,
-                            onClick = { showOptions = true },
+                            onClick = { optionsBefore = data.settings },
                             label = { Text("Options") },
                             leadingIcon = { Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp)) },
                         )
                         if (s.wheelchair) {
-                            FilterChip(selected = true, onClick = { showOptions = true }, label = { Text("Accessible") },
+                            FilterChip(selected = true, onClick = { optionsBefore = data.settings }, label = { Text("Accessible") },
                                 leadingIcon = { Icon(Icons.AutoMirrored.Rounded.Accessible, null, Modifier.size(18.dp)) })
                         }
                     }
@@ -487,14 +503,15 @@ fun RoutesScreen(model: RoutesModel) {
                 model.walkOnly?.let { w ->
                     item(key = "walk") { WalkOnlyCard(w, now) { model.open(w) } }
                 }
-                items(model.itineraries, key = { it.id }) { itin ->
+                items(itineraries, key = { it.id }) { itin ->
                     val tags = buildList {
                         // Ranked list: the first card is the recommended option.
-                        if (itin === model.itineraries.first() && model.itineraries.size > 1) add("Best")
+                        if (itin === itineraries.first() && itineraries.size > 1) add("Best")
                         if (itin.id == fastest) add("Fastest")
                         if (itin.id == leastWalk && itin.id != fastest) add("Least walking")
                     }
-                    val risk = model.riskiest(itin)
+                    // Transfer slack as the rides are expected to run, late ones included.
+                    val risk = model.riskiest(expectedOf(itin))
                     ItineraryCard(itin, model.live[itin.id], now, tags, risk, risk?.let(model::nextIfMissed),
                         model.rideLive, onLiveClick = { model.openLive(itin) }) { model.open(itin) }
                 }
@@ -522,10 +539,10 @@ fun RoutesScreen(model: RoutesModel) {
             model.setTime(mode, t)
         }
     }
-    if (showOptions) {
+    optionsBefore?.let { before ->
         OptionsSheet(model, onDismiss = {
-            showOptions = false
-            model.search()
+            optionsBefore = null
+            model.optionsClosed(before)
         })
     }
 }
@@ -610,17 +627,12 @@ fun ItineraryCard(
 ) {
     val x = LocalExtra.current
     val first = itin.firstTransit
-    // Walking time before boarding, so "leave in" can follow the live vehicle.
-    val walkBefore = first?.let { f -> itin.legs.takeWhile { it !== f }.sumOf { it.durationSec } } ?: 0
-    val boardAt = when (live?.status) {
-        LiveStatus.LIVE -> live.expected ?: first?.start
-        else -> first?.start
-    } ?: itin.start
-    val leaveAt = boardAt.minusSeconds(walkBefore)
-    val endAt = live?.alightExpected?.let { a ->
-        val after = first?.let { f -> itin.legs.dropWhile { it !== f }.drop(1) }.orEmpty()
-        if (after.none { it.mode.isTransit }) a.plusSeconds(after.sumOf { it.durationSec }) else null
-    } ?: itin.end
+    val liveOf: (Leg) -> LiveCall? = { o -> if (o.rideKey == first?.rideKey) live else rideLive[o.rideKey] }
+    // Times follow the live vehicles: "leave in" the first one, arrival with the last one, so a late
+    // bus in the plan doesn't leave the times on its timetable slot.
+    val expected = Combine.expected(itin, liveOf)
+    val leaveAt = expected.start
+    val endAt = expected.end
 
     Card(
         onClick = onClick,
@@ -654,10 +666,9 @@ fun ItineraryCard(
                 }
                 // The planned bus is live and close: you'd only make it by hurrying, so say so instead of "Missed".
                 val hurry = first != null && Combine.onlyByHurrying(itin, itin.legs.indexOf(first), first, now, live)
-                LeaveIn(leaveAt, now, live.freshness(now), hurry)
+                LeaveIn(leaveAt, now, live.freshness(now), hurry, first?.mode ?: TransitMode.BUS)
             }
             Spacer(Modifier.height(12.dp))
-            val liveOf: (Leg) -> LiveCall? = { o -> if (o.rideKey == first?.rideKey) live else rideLive[o.rideKey] }
             // Buses that can still be caught on each ride (other lines, the next ones, a late earlier one),
             // including a live one that's close enough to run for.
             val choices = itin.legs.withIndex().filter { it.value.mode.isTransit }
@@ -696,7 +707,7 @@ fun ItineraryCard(
                 Spacer(Modifier.height(if (leg === first) 12.dp else 8.dp))
                 val i = itin.legs.indexOf(leg)
                 RideOptions(leg, choices[leg.rideKey].orEmpty(), now, relative = leg === first, liveOf) { o ->
-                    Combine.onlyByHurrying(itin, i, o, now, liveOf(o))
+                    Combine.onlyByHurrying(itin, i, o, now, liveOf(o), liveOf)
                 }
             }
             if (risk != null) {
@@ -714,6 +725,9 @@ fun ItineraryCard(
         }
     }
 }
+
+/** Departures listed per ride before the rest fold into "N more". */
+const val SHOWN_RIDES = 3
 
 /** "16 / 92 / 5": every line that makes a combined ride, soonest first. */
 @Composable
@@ -743,15 +757,17 @@ fun RideOptions(
 ) {
     val x = LocalExtra.current
     val perLine = HashMap<String, Int>()
-    val options = rides.map { it to liveOf(it) }.sortedBy { (o, c) -> Combine.boards(o, c) }
+    val all = rides.map { it to liveOf(it) }.sortedBy { (o, c) -> Combine.boards(o, c) }
         .filter { (o, _) -> perLine.merge(Combine.lineKey(o), 1, Int::plus)!! <= 2 }
-    val lines = options.distinctBy { Combine.lineKey(it.first) }.size
+    val lines = all.distinctBy { Combine.lineKey(it.first) }.size
+    val options = all.take(SHOWN_RIDES)
+    val more = all.size - options.size
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 12.dp, vertical = 9.dp),
     ) {
         Text(
-            (if (lines > 1) "$lines lines" else "Next buses") + " from ${leg.from.name}",
+            (if (lines > 1) "$lines lines" else "Next ${TransitMode.vehiclesOf(options.map { it.first })}") + " from ${leg.from.name}",
             style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.height(6.dp))
@@ -774,6 +790,10 @@ fun RideOptions(
                         Text("Hurry", style = MaterialTheme.typography.labelMedium, color = x.late, fontWeight = FontWeight.SemiBold)
                     }
                 }
+            }
+            if (more > 0) {
+                Text("+$more more", style = MaterialTheme.typography.labelLarge, color = x.subtle,
+                    modifier = Modifier.align(Alignment.CenterVertically).testTag("more_rides"))
             }
         }
     }
@@ -808,12 +828,12 @@ fun TransferWarning(t: Ranking.Transfer, missed: Leg? = null, modifier: Modifier
 }
 
 @Composable
-private fun LeaveIn(leaveAt: Instant, now: Instant, freshness: Freshness, hurry: Boolean = false) {
+private fun LeaveIn(leaveAt: Instant, now: Instant, freshness: Freshness, hurry: Boolean = false, mode: TransitMode = TransitMode.BUS) {
     val min = (leaveAt.epochSecond - now.epochSecond + 30) / 60
     Column(horizontalAlignment = Alignment.End) {
         if (hurry && min <= 0) {
             Text("Hurry", style = MaterialTheme.typography.titleMedium, color = LocalExtra.current.late)
-            Text("bus is close", style = MaterialTheme.typography.labelSmall, color = LocalExtra.current.subtle)
+            Text("${mode.vehicle} is close", style = MaterialTheme.typography.labelSmall, color = LocalExtra.current.subtle)
         } else if (min <= 0 && min > -2) {
             Text("Go now", style = MaterialTheme.typography.titleMedium, color = LocalExtra.current.live)
         } else if (min in 1..90) {

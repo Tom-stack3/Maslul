@@ -114,6 +114,13 @@ class ParsingTest {
         val b = listOf(Place("דיזנגוף סנטר", 32.0756, 34.7751), Place("Other", 31.0, 35.0))
         val m = TransitRepository.mergePlaces(a, b)
         assertEquals(listOf("דיזנגוף סנטר", "Stop A", "Other"), m.map { it.name })
+        // One campus, entries 1 km apart that read the same: shown once; a different subtitle stays.
+        val campus = listOf(
+            Place("Tel Aviv University", 32.1133, 34.8044, subtitle = "תל אביב"),
+            Place("Tel Aviv University", 32.1220, 34.8050, subtitle = "תל אביב"),
+            Place("Tel Aviv University", 32.1180, 34.8040, subtitle = "Dormitories"),
+        )
+        assertEquals(listOf("תל אביב", "Dormitories"), TransitRepository.mergePlaces(campus, emptyList()).map { it.subtitle })
     }
 
     @Test

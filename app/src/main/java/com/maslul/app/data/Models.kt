@@ -13,7 +13,28 @@ enum class TransitMode {
 
     val isTransit get() = this != WALK
 
+    /** One vehicle of this mode, as riders say it: "train is close". */
+    val vehicle: String
+        get() = when (this) {
+            BUS -> "bus"
+            TRAIN, LIGHT_RAIL, METRO -> "train"
+            CABLE_CAR -> "cable car"
+            FERRY -> "ferry"
+            WALK, OTHER -> "ride"
+        }
+
+    /** Several vehicles of this mode: "Next trains". */
+    val vehicles: String
+        get() = when (this) {
+            BUS -> "buses"
+            FERRY -> "ferries"
+            else -> vehicle + "s"
+        }
+
     companion object {
+        /** [vehicles] for a mix of rides: their mode's word when they share one, else "rides". */
+        fun vehiclesOf(rides: List<Leg>): String = rides.map { it.mode }.distinct().singleOrNull()?.vehicles ?: "rides"
+
         /** Maps a MOTIS mode string to the modes that exist in Israel. */
         fun fromMotis(mode: String?): TransitMode = when (mode) {
             "WALK" -> WALK

@@ -14,8 +14,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // The only place to bump the version: raise versionCode by 1 with every release.
-        versionCode = 3
-        versionName = "1.0.2"
+        versionCode = 4
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Modern phones (arm64) + the x86_64 emulator; keeps MapLibre's native libs small.
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }

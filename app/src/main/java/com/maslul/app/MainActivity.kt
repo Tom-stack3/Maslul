@@ -59,6 +59,12 @@ import com.maslul.app.ui.lines.TripModel
 import com.maslul.app.ui.lines.TripScreen
 import com.maslul.app.ui.nav.NavHomeModel
 import com.maslul.app.ui.nav.NavHomeScreen
+import com.maslul.app.ui.nav.OnBoardModel
+import com.maslul.app.ui.nav.OnBoardScreen
+import com.maslul.app.ui.nav.ShuttleEditModel
+import com.maslul.app.ui.nav.ShuttleEditScreen
+import com.maslul.app.ui.nav.ShuttlesModel
+import com.maslul.app.ui.nav.ShuttlesScreen
 import com.maslul.app.ui.nav.PickOnMapModel
 import com.maslul.app.ui.nav.PickOnMapScreen
 import com.maslul.app.ui.nav.RouteDetailModel
@@ -180,6 +186,9 @@ private fun ScreenHost(screen: ScreenModel) {
         is RoutesModel -> RoutesScreen(screen)
         is RouteDetailModel -> RouteDetailScreen(screen)
         is SettingsModel -> SettingsScreen(screen)
+        is OnBoardModel -> OnBoardScreen(screen)
+        is ShuttlesModel -> ShuttlesScreen(screen)
+        is ShuttleEditModel -> ShuttleEditScreen(screen)
         is LinesHomeModel -> LinesHomeScreen(screen)
         is StationsHomeModel -> StationsHomeScreen(screen)
         is LineModel -> LineScreen(screen)

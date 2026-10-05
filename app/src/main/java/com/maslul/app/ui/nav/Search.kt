@@ -156,6 +156,11 @@ class SearchModel(
     fun pickOnMap() {
         nav.push(PickOnMapModel(nav) { p -> nav.pop(); choose(p) })
     }
+
+    /** Starts the trip from the bus or train the user is on. */
+    fun pickOnBoard() {
+        nav.push(OnBoardModel(nav) { p -> nav.pop(); choose(p) })
+    }
 }
 
 @Composable
@@ -241,6 +246,12 @@ fun SearchScreen(model: SearchModel) {
                     item {
                         PlaceRow("Current location", null, icon = Icons.Rounded.MyLocation, iconTint = MaterialTheme.colorScheme.primary) {
                             model.choose(CurrentLocation)
+                        }
+                    }
+                    if (model.editing == SearchField.FROM && data.settings.onBoard) {
+                        item {
+                            PlaceRow("On a bus or train now", "Plan from the ride you're on", icon = Icons.Rounded.DirectionsBus,
+                                iconTint = MaterialTheme.colorScheme.primary) { model.pickOnBoard() }
                         }
                     }
                 }
@@ -333,6 +344,7 @@ fun kindIcon(k: PlaceKind): ImageVector = when (k) {
     PlaceKind.CURRENT_LOCATION -> Icons.Rounded.MyLocation
     PlaceKind.POI -> Icons.Rounded.Business
     PlaceKind.PIN -> Icons.Rounded.Place
+    PlaceKind.ON_BOARD -> Icons.Rounded.DirectionsBus
 }
 
 @Composable

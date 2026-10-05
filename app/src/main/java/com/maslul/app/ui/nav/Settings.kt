@@ -48,6 +48,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.DirectionsBus
+import androidx.compose.material3.Switch
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
@@ -69,6 +71,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import com.maslul.app.data.ThemeMode
 import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
@@ -161,6 +164,29 @@ fun SettingsScreen(model: SettingsModel) {
                 }
             }
 
+            SectionHeader("Advanced")
+            SettingSwitch(
+                "Getting a ride (טרמפ)",
+                "Find the best place to be dropped off and go on by bus or train",
+                s.rides, Modifier.testTag("rides_switch"),
+            ) { c -> model.store.updateSettings { it.copy(rides = c) } }
+            SettingSwitch(
+                "Already on a bus",
+                "Plan the rest of the trip from the bus or train you're on",
+                s.onBoard, Modifier.testTag("on_board_switch"),
+            ) { c -> model.store.updateSettings { it.copy(onBoard = c) } }
+            PlaceRow(
+                "My shuttles",
+                when (val n = data.shuttles.size) {
+                    0 -> "Company or private shuttles with a fixed timetable"
+                    1 -> data.shuttles.first().name
+                    else -> "$n shuttles"
+                },
+                icon = Icons.Rounded.DirectionsBus,
+                iconTint = MaterialTheme.colorScheme.primary,
+                onClick = { model.nav.push(ShuttlesModel(model.nav)) },
+            )
+
             SectionHeader("About")
             Row(
                 Modifier.fillMaxWidth()
@@ -215,6 +241,22 @@ fun SettingsScreen(model: SettingsModel) {
     if (drives > 0) DrivingBus(drives, Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(bottom = 12.dp))
     }
     FavoriteDialogHost(model.store, model.favoriteDraft) { model.favoriteDraft = null }
+}
+
+/** A setting row that toggles when tapped anywhere. */
+@Composable
+private fun SettingSwitch(title: String, subtitle: String, checked: Boolean, modifier: Modifier = Modifier, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = LocalExtra.current.subtle)
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
 }
 
 @Composable

@@ -9,9 +9,11 @@ val IsraelZone: ZoneId = ZoneId.of("Asia/Jerusalem")
 data class GeoPoint(val lat: Double, val lon: Double)
 
 enum class TransitMode {
-    WALK, BUS, TRAIN, LIGHT_RAIL, METRO, CABLE_CAR, FERRY, OTHER;
+    WALK, BUS, TRAIN, LIGHT_RAIL, METRO, CABLE_CAR, FERRY, OTHER,
+    /** A lift in someone's car (see [RideOffer]); like a walk, it's not a ride to catch. */
+    CAR;
 
-    val isTransit get() = this != WALK
+    val isTransit get() = this != WALK && this != CAR
 
     /** One vehicle of this mode, as riders say it: "train is close". */
     val vehicle: String
@@ -20,6 +22,7 @@ enum class TransitMode {
             TRAIN, LIGHT_RAIL, METRO -> "train"
             CABLE_CAR -> "cable car"
             FERRY -> "ferry"
+            CAR -> "car"
             WALK, OTHER -> "ride"
         }
 
@@ -45,6 +48,7 @@ enum class TransitMode {
             "SUBWAY", "METRO", "FUNICULAR" -> METRO
             "AERIAL_LIFT", "AREAL_LIFT", "CABLE_CAR" -> CABLE_CAR
             "FERRY" -> FERRY
+            "CAR", "CAR_DROPOFF", "CAR_PARKING" -> CAR
             else -> OTHER
         }
 
@@ -62,7 +66,11 @@ enum class TransitMode {
     }
 }
 
-enum class PlaceKind { CURRENT_LOCATION, ADDRESS, POI, STOP, HOME, WORK, PIN }
+enum class PlaceKind {
+    CURRENT_LOCATION, ADDRESS, POI, STOP, HOME, WORK, PIN,
+    /** Aboard a bus or train already ([Place.tripId]): trips start from its next stop. */
+    ON_BOARD,
+}
 
 @Serializable
 data class Place(
@@ -72,6 +80,8 @@ data class Place(
     val subtitle: String? = null,
     val kind: PlaceKind = PlaceKind.POI,
     val stopId: String? = null,
+    /** The trip ridden, for [PlaceKind.ON_BOARD]. */
+    val tripId: String? = null,
 ) {
     val point get() = GeoPoint(lat, lon)
     /** Identity used to dedupe suggestions and recents. */
@@ -123,6 +133,10 @@ data class Leg(
     val agencyId: String? = null,
     /** Other lines riding between the same two stops, for a combined option (see [Combine]). */
     val alternatives: List<Leg> = emptyList(),
+    /** The user's own [Shuttle] this ride is on, if it is one. */
+    val shuttleId: String? = null,
+    /** Leaves at its own time (a driver heading somewhere), rather than to suit the ride after it. */
+    val fixed: Boolean = false,
 ) {
     val durationSec get() = end.epochSecond - start.epochSecond
     val combined get() = alternatives.isNotEmpty()
@@ -160,6 +174,8 @@ data class PlanResult(
     val walkOnly: Itinerary?,
     val nextCursor: String?,
     val previousCursor: String?,
+    /** Driving all the way, when the request asked for direct car routes. */
+    val carOnly: Itinerary? = null,
 )
 
 /** A departure from a stop, as shown on a stop board. */

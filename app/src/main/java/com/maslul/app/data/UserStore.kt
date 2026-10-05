@@ -41,6 +41,10 @@ data class Settings(
     val wheelchair: Boolean = false,
     val railPreference: RailPreference = RailPreference.NONE,
     val reminderMinutes: Int = 5,
+    /** Offers planning around a ride (טרמפ) for the first part of a trip. */
+    val rides: Boolean = false,
+    /** Offers planning from the bus or train you're on. */
+    val onBoard: Boolean = false,
 )
 
 @Serializable
@@ -71,6 +75,7 @@ data class UserData(
     val favoriteLines: List<LineRoute> = emptyList(),
     val savedTrips: List<SavedTrip> = emptyList(),
     val favoriteStops: List<Place> = emptyList(),
+    val shuttles: List<Shuttle> = emptyList(),
     val settings: Settings = Settings(),
 )
 
@@ -127,7 +132,7 @@ class UserStore(context: Context) {
     fun setWork(p: Place?) = edit { it.copy(work = p?.copy(kind = PlaceKind.WORK)) }
 
     fun addRecent(p: Place) {
-        if (p.kind == PlaceKind.CURRENT_LOCATION) return
+        if (p.kind == PlaceKind.CURRENT_LOCATION || p.kind == PlaceKind.ON_BOARD) return
         edit { d -> d.copy(recents = (listOf(p) + d.recents.filter { it.key != p.key }).take(12)) }
     }
 
@@ -161,6 +166,14 @@ class UserStore(context: Context) {
     }
 
     fun updateSettings(f: (Settings) -> Settings) = edit { it.copy(settings = f(it.settings)) }
+
+    /** Adds [s], or replaces the shuttle with its id. */
+    fun saveShuttle(s: Shuttle) = edit { d ->
+        val i = d.shuttles.indexOfFirst { it.id == s.id }
+        d.copy(shuttles = if (i < 0) d.shuttles + s else d.shuttles.toMutableList().also { it[i] = s })
+    }
+
+    fun removeShuttle(id: String) = edit { d -> d.copy(shuttles = d.shuttles.filter { it.id != id }) }
 
     private companion object {
         const val KEY = "store_v1"

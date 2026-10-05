@@ -33,6 +33,15 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
         /** Route from/to these stops exactly instead of the coordinates. */
         val fromStopId: String? = null,
         val toStopId: String? = null,
+        /** How to reach the first stop, e.g. "CAR_DROPOFF" for a lift (MOTIS default: walking). */
+        val preTransitModes: String? = null,
+        /** Longest time to reach the first stop, when not [maxWalkMinutes] (e.g. how far a driver will go). */
+        val maxPreTransitMinutes: Int? = null,
+        /** Door-to-door modes without transit, e.g. "WALK,CAR" (MOTIS default: walking). */
+        val directModes: String? = null,
+        val maxDirectMinutes: Int? = null,
+        /** Only the direct ([directModes]) route: no transit is searched. */
+        val directOnly: Boolean = false,
     )
 
     suspend fun plan(req: PlanRequest): PlanResult {
@@ -46,11 +55,15 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
             .addQueryParameter("additionalTransferTime", req.additionalTransferMinutes.toString())
             .addQueryParameter("arriveBy", req.arriveBy.toString())
             .addQueryParameter("pedestrianSpeed", req.walkSpeedMps.toString())
-            .addQueryParameter("maxPreTransitTime", (req.maxWalkMinutes * 60).toString())
+            .addQueryParameter("maxPreTransitTime", ((req.maxPreTransitMinutes ?: req.maxWalkMinutes) * 60).toString())
             .addQueryParameter("maxPostTransitTime", (req.maxWalkMinutes * 60).toString())
             .apply {
                 req.time?.let { addQueryParameter("time", queryTime(it)) }
-                motisModes(req.modes)?.let { addQueryParameter("transitModes", it) }
+                // Transit modes of WALK alone leave nothing to ride, so only the direct route is searched.
+                (if (req.directOnly) "WALK" else motisModes(req.modes))?.let { addQueryParameter("transitModes", it) }
+                req.preTransitModes?.let { addQueryParameter("preTransitModes", it) }
+                req.directModes?.let { addQueryParameter("directModes", it) }
+                req.maxDirectMinutes?.let { addQueryParameter("maxDirectTime", (it * 60).toString()) }
                 if (req.wheelchair) addQueryParameter("pedestrianProfile", "WHEELCHAIR")
                 req.maxTransfers?.let { addQueryParameter("maxTransfers", it.toString()) }
                 req.pageCursor?.let { addQueryParameter("pageCursor", it) }
@@ -63,6 +76,7 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
             walkOnly = dto.direct.firstOrNull { it.legs.all { l -> l.mode == "WALK" } }?.toDomain(),
             nextCursor = dto.nextPageCursor,
             previousCursor = dto.previousPageCursor,
+            carOnly = dto.direct.firstOrNull { it.legs.any { l -> l.mode == "CAR" } }?.toDomain(),
         )
     }
 
@@ -261,14 +275,17 @@ class LegDto(
     fun toDomain(): Leg {
         val mode = TransitMode.fromMotis(mode)
         val geometry = runCatching { Polyline.decode(legGeometry.points, legGeometry.precision) }.getOrDefault(emptyList())
+        // Israel has no realtime in Transitous; scheduled times are the baseline.
+        val start = TransitousApi.instant(scheduledStartTime ?: startTime) ?: Instant.EPOCH
+        val end = TransitousApi.instant(scheduledEndTime ?: endTime) ?: Instant.EPOCH
         return Leg(
             mode = mode,
             from = from.toStopCall(),
             to = to.toStopCall(),
-            // Israel has no realtime in Transitous; scheduled times are the baseline.
-            start = TransitousApi.instant(scheduledStartTime ?: startTime) ?: Instant.EPOCH,
-            end = TransitousApi.instant(scheduledEndTime ?: endTime) ?: Instant.EPOCH,
-            distanceM = distance ?: if (mode == TransitMode.WALK && geometry.size > 1) GeoMath.cumulative(geometry).last() else null,
+            start = start,
+            // A walk after a car drop-off can come back a few seconds "shorter than nothing".
+            end = if (!mode.isTransit && end.isBefore(start)) start else end,
+            distanceM = distance ?: if (!mode.isTransit && geometry.size > 1) GeoMath.cumulative(geometry).last() else null,
             headsign = headsign?.let { cleanHeadsign(it) },
             routeShortName = routeShortName ?: displayName,
             routeLongName = routeLongName,
@@ -324,7 +341,17 @@ class ItineraryDto(
     val legs: List<LegDto> = emptyList(),
 ) {
     fun toDomain(): Itinerary {
-        val legs = legs.map { it.toDomain() }
+        val legs = legs.map { it.toDomain() }.toMutableList()
+        // After a car drop-off MOTIS pads the drive by a couple of minutes and takes them back with
+        // a walk of negative length: the car really gets there when that walk "ends".
+        for (i in 1 until legs.size) {
+            val raw = this.legs[i]
+            val end = TransitousApi.instant(raw.scheduledEndTime ?: raw.endTime) ?: continue
+            if (legs[i - 1].mode == TransitMode.CAR && end.isBefore(legs[i].start)) {
+                legs[i - 1] = legs[i - 1].copy(end = end)
+                legs[i] = legs[i].copy(start = end, end = end)
+            }
+        }
         return Itinerary(
             id = id.ifBlank { legs.joinToString { "${it.tripId}${it.start}" } },
             start = legs.firstOrNull()?.start ?: TransitousApi.instant(startTime) ?: Instant.EPOCH,

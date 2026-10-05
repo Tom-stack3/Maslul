@@ -11,6 +11,29 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
+import androidx.compose.material3.BottomSheetScaffold
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberStandardBottomSheetState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import com.maslul.app.data.UserData
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,6 +55,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DirectionsBus
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.MyLocation
@@ -125,6 +149,13 @@ class NavHomeModel(nav: AppNav) : ScreenModel(nav) {
 
     fun openStop(p: Place) = nav.push(StopModel(nav, p))
 
+    /** Already on a bus or train: pick it, then where to, and plan from its next stop. */
+    fun onBoard() {
+        nav.push(OnBoardModel(nav) { p ->
+            nav.replace(SearchModel(nav, from = p, to = null, editing = SearchField.TO) { f, t -> nav.replace(RoutesModel(nav, f, t!!)) })
+        })
+    }
+
     /** Place whose favourite label is being edited. */
     var favoriteDraft by mutableStateOf<FavoriteDraft?>(null)
 
@@ -140,6 +171,7 @@ class NavHomeModel(nav: AppNav) : ScreenModel(nav) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NavHomeScreen(model: NavHomeModel) {
     val data by model.store.data.collectAsState()
@@ -159,129 +191,200 @@ fun NavHomeScreen(model: NavHomeModel) {
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        TransitMap(
-            modifier = Modifier.fillMaxSize(),
-            markers = model.stops.map { MapMarker(it.point, Color(0xFF6B7280), MarkerKind.STOP_SMALL, it.stopId) },
-            user = user,
-            initialCenter = user ?: LocationRepo.DEFAULT,
-            initialZoom = 15.0,
-            controller = controller,
-            onMarkerClick = { id -> model.stops.firstOrNull { it.stopId == id }?.let(model::openStop) },
-            onLongPress = { p -> model.planTo(Place("Dropped pin", p.lat, p.lon, kind = PlaceKind.PIN)) },
-            onCameraIdle = model::onCameraIdle,
-            compassModifier = Modifier.statusBarsPadding().padding(top = 84.dp, end = 16.dp),
+    // The places sheet can be dragged down (or hidden) to enlarge the map, as on a route or a line.
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val layoutPx = constraints.maxHeight.toFloat()
+        val statusBar = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val navBarPx = with(density) { WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding().toPx() }
+        val peek = minOf(maxHeight * 0.45f, 360.dp)
+        val sheetMax = maxHeight - statusBar - 80.dp
+        val scaffold = rememberBottomSheetScaffoldState(
+            bottomSheetState = rememberStandardBottomSheetState(initialValue = SheetValue.PartiallyExpanded, skipHiddenState = false),
         )
+        val sheet = scaffold.bottomSheetState
+        val mapOnly = sheet.currentValue == SheetValue.Hidden && sheet.targetValue == SheetValue.Hidden
+        val scope = rememberCoroutineScope()
+        // Where the sheet's top edge is now, following a drag as it happens.
+        val sheetTop = { runCatching { sheet.requireOffset() }.getOrDefault(layoutPx - with(density) { peek.toPx() }) }
+        // Pulled up past the middle, the buttons riding on it would crowd the search card: they step aside.
+        val buttonsShown by remember { derivedStateOf { sheetTop() > layoutPx * 0.4f } }
+        BottomSheetScaffold(
+            scaffoldState = scaffold,
+            modifier = Modifier.testTag("home_screen"),
+            sheetPeekHeight = peek,
+            sheetShadowElevation = 12.dp,
+            sheetContainerColor = MaterialTheme.colorScheme.surface,
+            sheetContent = {
+                // Never taller than the space under the search card, which stays in reach.
+                Column(
+                    Modifier.fillMaxWidth().heightIn(max = sheetMax)
+                        .verticalScroll(rememberScrollState()).testTag("home_sheet"),
+                ) {
+                    HomePlaces(model, data)
+                }
+            },
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                TransitMap(
+                    modifier = Modifier.fillMaxSize(),
+                    markers = model.stops.map { MapMarker(it.point, Color(0xFF6B7280), MarkerKind.STOP_SMALL, it.stopId) },
+                    user = user,
+                    initialCenter = user ?: LocationRepo.DEFAULT,
+                    initialZoom = 15.0,
+                    controller = controller,
+                    onMarkerClick = { id -> model.stops.firstOrNull { it.stopId == id }?.let(model::openStop) },
+                    onLongPress = { p -> model.planTo(Place("Dropped pin", p.lat, p.lon, kind = PlaceKind.PIN)) },
+                    onCameraIdle = model::onCameraIdle,
+                    compassModifier = Modifier.statusBarsPadding().padding(top = 84.dp, end = 16.dp),
+                )
 
-        // Search card
-        Column(Modifier.statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp)) {
-            Surface(
-                onClick = model::openSearch,
-                shape = RoundedCornerShape(18.dp),
-                shadowElevation = 6.dp,
-                color = MaterialTheme.colorScheme.surface,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(Modifier.padding(start = 18.dp, end = 4.dp).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        "Where to?",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(onClick = { model.nav.push(SettingsModel(model.nav)) }) {
-                        Icon(Icons.Rounded.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Search card
+                Column(Modifier.statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp)) {
+                    Surface(
+                        onClick = model::openSearch,
+                        shape = RoundedCornerShape(18.dp),
+                        shadowElevation = 6.dp,
+                        color = MaterialTheme.colorScheme.surface,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(Modifier.padding(start = 18.dp, end = 4.dp).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                "Where to?",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(onClick = { model.nav.push(SettingsModel(model.nav)) }) {
+                                Icon(Icons.Rounded.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                     }
                 }
-            }
-        }
 
-        // Bottom panel
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
-            SmallFloatingActionButton(
-                onClick = {
-                    model.scope.launch {
-                        (model.location.current() ?: user)?.let { controller.moveTo(it, 15.5) }
-                            ?: permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
-                    }
-                },
-                containerColor = MaterialTheme.colorScheme.surface,
-                contentColor = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.align(Alignment.End).padding(end = 16.dp, bottom = 12.dp),
-            ) { Icon(Icons.Rounded.MyLocation, "My location") }
-
-            Surface(
-                shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
-                shadowElevation = 12.dp,
-                color = MaterialTheme.colorScheme.surface,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(Modifier.heightIn(max = 330.dp).verticalScroll(rememberScrollState()).padding(bottom = 8.dp)) {
-                    Box(
-                        Modifier.padding(top = 8.dp).align(Alignment.CenterHorizontally).size(36.dp, 4.dp)
-                            .clip(CircleShape).background(MaterialTheme.colorScheme.outlineVariant),
-                    )
-                    // Home and Work share the width; labelled favourites scroll beneath them.
+                // Buttons on the sheet's top edge (on the screen's bottom when the sheet is hidden).
+                var rowHeight by remember { mutableIntStateOf(0) }
+                if (buttonsShown) {
                     Row(
-                        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        Modifier.fillMaxWidth()
+                            .offset { IntOffset(0, (minOf(sheetTop(), layoutPx - navBarPx) - rowHeight).roundToInt()) }
+                            .onSizeChanged { rowHeight = it.height }
+                            .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        QuickPlace("Home", data.home?.name ?: "Set location", Icons.Rounded.Home,
-                            modifier = Modifier.weight(1f),
-                            onClick = { data.home?.let(model::planTo) ?: model.pickHomeOrWork(true) },
-                            onEdit = { model.pickHomeOrWork(true) })
-                        QuickPlace("Work", data.work?.name ?: "Set location", Icons.Rounded.Work,
-                            modifier = Modifier.weight(1f),
-                            onClick = { data.work?.let(model::planTo) ?: model.pickHomeOrWork(false) },
-                            onEdit = { model.pickHomeOrWork(false) })
-                    }
-                    Row(
-                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                            .padding(start = 16.dp, end = 16.dp, top = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        data.favoritePlaces.forEach { f ->
-                            FavoriteChip(f.label, f.icon.vector(),
-                                onClick = { model.planTo(f.place) },
-                                onLongClick = { model.editFavorite(f.place) })
+                        // Advanced: plan from the bus you're on. Hidden unless switched on in Settings.
+                        if (data.settings.onBoard) {
+                            Surface(
+                                onClick = model::onBoard,
+                                shape = RoundedCornerShape(20.dp),
+                                shadowElevation = 4.dp,
+                                color = MaterialTheme.colorScheme.surface,
+                                modifier = Modifier.testTag("on_board"),
+                            ) {
+                                Row(Modifier.padding(start = 12.dp, end = 14.dp).height(40.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Rounded.DirectionsBus, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("On a bus?", style = MaterialTheme.typography.labelLarge)
+                                }
+                            }
                         }
-                        AddFavoriteChip(if (data.favoritePlaces.isEmpty()) "Add favorite place" else "Add", model::addFavorite)
-                    }
-                    if (data.savedTrips.isNotEmpty()) {
-                        SectionHeader("Saved trips")
-                        data.savedTrips.forEach { t -> SavedTripRow(t) { model.planTo(t.to, t.from) } }
-                    }
-                    SectionHeader("Recent")
-                    if (data.recents.isEmpty()) {
-                        Text(
-                            "Search for a place, or long-press the map to get directions there.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = LocalExtra.current.subtle,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                        )
-                    }
-                    data.recents.take(6).forEach { p ->
-                        PlaceRow(
-                            title = p.name,
-                            subtitle = p.subtitle,
-                            icon = Icons.Rounded.History,
-                            trailing = {
-                                IconButton(onClick = { model.store.removeRecent(p) }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Rounded.Close, "Remove", tint = LocalExtra.current.subtle, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.weight(1f))
+                        SmallFloatingActionButton(
+                            onClick = { scope.launch { if (mapOnly) sheet.partialExpand() else sheet.hide() } },
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("home_map_expand"),
+                        ) {
+                            Icon(if (mapOnly) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen,
+                                if (mapOnly) "Show places" else "Expand map")
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        SmallFloatingActionButton(
+                            onClick = {
+                                model.scope.launch {
+                                    (model.location.current() ?: user)?.let { controller.moveTo(it, 15.5) }
+                                        ?: permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
                                 }
                             },
-                            onLongClick = { model.editFavorite(p) },
-                            onClick = { model.planTo(p) },
-                        )
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            contentColor = MaterialTheme.colorScheme.primary,
+                        ) { Icon(Icons.Rounded.MyLocation, "My location") }
                     }
-                    Spacer(Modifier.navigationBarsPadding().height(4.dp))
+                }
+                if (mapOnly) {
+                    ExtendedFloatingActionButton(
+                        onClick = { scope.launch { sheet.partialExpand() } },
+                        icon = { Icon(Icons.Rounded.ExpandLess, null) },
+                        text = { Text("Places") },
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 76.dp)
+                            .testTag("home_show_places"),
+                    )
                 }
             }
         }
     }
     FavoriteDialogHost(model.store, model.favoriteDraft) { model.favoriteDraft = null }
+}
+
+@Composable
+private fun HomePlaces(model: NavHomeModel, data: UserData) {
+    // Home and Work share the width; labelled favourites scroll beneath them.
+    Row(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        QuickPlace("Home", data.home?.name ?: "Set location", Icons.Rounded.Home,
+            modifier = Modifier.weight(1f),
+            onClick = { data.home?.let(model::planTo) ?: model.pickHomeOrWork(true) },
+            onEdit = { model.pickHomeOrWork(true) })
+        QuickPlace("Work", data.work?.name ?: "Set location", Icons.Rounded.Work,
+            modifier = Modifier.weight(1f),
+            onClick = { data.work?.let(model::planTo) ?: model.pickHomeOrWork(false) },
+            onEdit = { model.pickHomeOrWork(false) })
+    }
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+            .padding(start = 16.dp, end = 16.dp, top = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        data.favoritePlaces.forEach { f ->
+            FavoriteChip(f.label, f.icon.vector(),
+                onClick = { model.planTo(f.place) },
+                onLongClick = { model.editFavorite(f.place) })
+        }
+        AddFavoriteChip(if (data.favoritePlaces.isEmpty()) "Add favorite place" else "Add", model::addFavorite)
+    }
+    if (data.savedTrips.isNotEmpty()) {
+        SectionHeader("Saved trips")
+        data.savedTrips.forEach { t -> SavedTripRow(t) { model.planTo(t.to, t.from) } }
+    }
+    SectionHeader("Recent")
+    if (data.recents.isEmpty()) {
+        Text(
+            "Search for a place, or long-press the map to get directions there.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = LocalExtra.current.subtle,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+        )
+    }
+    data.recents.take(6).forEach { p ->
+        PlaceRow(
+            title = p.name,
+            subtitle = p.subtitle,
+            icon = Icons.Rounded.History,
+            trailing = {
+                IconButton(onClick = { model.store.removeRecent(p) }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Rounded.Close, "Remove", tint = LocalExtra.current.subtle, modifier = Modifier.size(18.dp))
+                }
+            },
+            onLongClick = { model.editFavorite(p) },
+            onClick = { model.planTo(p) },
+        )
+    }
+    Spacer(Modifier.navigationBarsPadding().height(4.dp))
 }
 
 @Composable

@@ -83,6 +83,7 @@ import com.maslul.app.data.Itinerary
 import com.maslul.app.data.Leg
 import com.maslul.app.data.LiveApproach
 import com.maslul.app.data.Ranking
+import com.maslul.app.data.ShuttleSchedule
 import com.maslul.app.data.LiveCall
 import com.maslul.app.data.LiveStatus
 import com.maslul.app.data.Place
@@ -137,7 +138,10 @@ class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: P
         val modes = store.data.value.settings.modes
         val first = original.legs.indexOfFirst { it.mode.isTransit }
         original.legs.forEachIndexed { i, l ->
-            if (i > first && l.mode.isTransit) {
+            // The user's own shuttle: its timetable says what comes next.
+            val own = l.shuttleId?.let { ShuttleSchedule.ridesAfter(store.data.value.shuttles, l) }
+            if (i > first && own != null) after[i] = own
+            else if (i > first && l.mode.isTransit && l.shuttleId == null) {
                 after[i] = null
                 scope.launch {
                     runCatching { repo.ridesAfter(l, modes) }.onSuccess { after[i] = it }.onFailure { after.remove(i) }
@@ -391,8 +395,11 @@ private fun RouteMap(model: RouteDetailModel, modifier: Modifier, padding: Paddi
     val lines = remember(itin, x.isDark) {
         itin.legs.map { l ->
             val pts = l.geometry.ifEmpty { listOf(l.from.point, l.to.point) }
-            if (l.mode == TransitMode.WALK) MapLine(pts, if (x.isDark) Color(0xFFB0B8C4) else Color(0xFF5B6472), 5f, dashed = true)
-            else MapLine(pts, lineColor(l), 6f)
+            when (l.mode) {
+                TransitMode.WALK -> MapLine(pts, if (x.isDark) Color(0xFFB0B8C4) else Color(0xFF5B6472), 5f, dashed = true)
+                TransitMode.CAR -> MapLine(pts, if (x.isDark) Color(0xFF9AA3B2) else Color(0xFF3F4652), 6f)
+                else -> MapLine(pts, lineColor(l), 6f)
+            }
         }
     }
     val markers = remember(itin) {
@@ -495,7 +502,12 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
     // Leaving and arriving as the rides are expected to run (the stops show their own live times).
     val expected = model.expected()
     val walkRail = RailSpec(Rail.DOTTED, x.walk)
-    fun railOf(l: Leg) = if (l.mode == TransitMode.WALK) walkRail else RailSpec(Rail.SOLID, lineColor(l))
+    val carRail = RailSpec(Rail.SOLID, x.subtle)
+    fun railOf(l: Leg) = when (l.mode) {
+        TransitMode.WALK -> walkRail
+        TransitMode.CAR -> carRail
+        else -> RailSpec(Rail.SOLID, lineColor(l))
+    }
     val onSurface = MaterialTheme.colorScheme.onSurface
 
     Column {
@@ -506,12 +518,16 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
             Spacer(Modifier.height(10.dp))
         }
         legs.forEachIndexed { i, leg ->
-            if (leg.mode == TransitMode.WALK) {
-                WalkSegment(leg, walkRail)
-                // A node where the walk ends, unless the next leg draws its own boarding node.
+            if (!leg.mode.isTransit) {
+                if (leg.mode == TransitMode.CAR) CarSegment(leg, carRail) else WalkSegment(leg, walkRail)
+                // A node where the walk (or the lift) ends, unless the next leg draws its own boarding node.
                 val next = legs.getOrNull(i + 1)
-                if (next != null && next.mode == TransitMode.WALK) {
-                    TimelineRow(walkRail, walkRail, Node.SMALL, x.walk) { Text(leg.to.name, style = MaterialTheme.typography.bodyMedium) }
+                if (next != null && !next.mode.isTransit) {
+                    val name = leg.to.name.ifBlank { if (leg.mode == TransitMode.CAR) "Get out here" else "" }
+                    TimelineRow(railOf(leg), railOf(next), Node.SMALL, if (leg.mode == TransitMode.CAR) x.subtle else x.walk,
+                        time = if (leg.mode == TransitMode.CAR) ({ TimeText(leg.end) }) else null) {
+                        Text(name, style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             } else {
                 val c = lineColor(leg)
@@ -527,6 +543,9 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
                     time = { TimeText(leg.start, live?.takeIf { it.status == LiveStatus.LIVE }?.let { it.expected }, live.freshness(now)) },
                 ) {
                     Text(leg.from.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
+                    if (leg.tripId != null && leg.tripId == model.from.tripId) {
+                        Text("You're on this ${leg.mode.vehicle}: stay on", style = MaterialTheme.typography.bodySmall, color = x.subtle)
+                    }
                     leg.from.platformLabel?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = x.subtle) }
                     model.tightTransferInto(leg)?.let { TransferWarning(it, modifier = Modifier.padding(top = 4.dp)) }
                 }
@@ -595,6 +614,22 @@ private fun WalkSegment(leg: Leg, rail: RailSpec) {
     }
 }
 
+/** "Car · 18 min · 12 km": a lift for part of the way. */
+@Composable
+private fun CarSegment(leg: Leg, rail: RailSpec) {
+    val x = LocalExtra.current
+    TimelineRow(rail, rail, Node.NONE, Color.Transparent) {
+        Row(Modifier.padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(com.maslul.app.ui.components.modeIcon(TransitMode.CAR), null, tint = x.subtle, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "Ride ${Fmt.duration(leg.durationSec)}" + (leg.distanceM?.let { " · ${Fmt.distance(it)}" } ?: ""),
+                style = MaterialTheme.typography.bodyMedium, color = x.subtle,
+            )
+        }
+    }
+}
+
 @Composable
 private fun TransitSegment(model: RouteDetailModel, index: Int, leg: Leg, rail: RailSpec, live: LiveCall?, now: Instant) {
     val x = LocalExtra.current
@@ -624,7 +659,10 @@ private fun TransitSegment(model: RouteDetailModel, index: Int, leg: Leg, rail: 
         }
         Spacer(Modifier.height(6.dp))
         val legIndex = model.itinerary.legs.indexOf(leg)
-        LiveStatusChip(live, leg, now, onClick = { model.following = legIndex })
+        // On the bus already: "passed this stop, check the next one" isn't advice for you.
+        if (leg.tripId == null || leg.tripId != model.from.tripId) {
+            LiveStatusChip(live, leg, now, onClick = { model.following = legIndex })
+        }
         if (model.lookingForRidesAfter(index)) {
             Text("If you miss it: checking the next rides…", style = MaterialTheme.typography.labelMedium,
                 color = x.subtle, modifier = Modifier.padding(top = 8.dp).testTag("missed_rides_loading"))
@@ -713,7 +751,12 @@ private fun LineOptions(
     val lines = options.distinctBy { Combine.lineKey(it.first) }.size
     val vehicles = TransitMode.vehiclesOf(options.map { it.first })
     Text(
-        (if (lines > 1) "${options.size} $vehicles go this way" else "Next ${options.size} $vehicles of ${leg.lineLabel}") + " · tap to choose",
+        when {
+            lines > 1 -> "${options.size} $vehicles go this way"
+            // The user's own shuttle: "Next 2 shuttles", not "buses of Office shuttle".
+            options.all { it.first.shuttleId != null } -> "Next ${options.size} shuttles"
+            else -> "Next ${options.size} $vehicles of ${leg.lineLabel}"
+        } + " · tap to choose",
         style = MaterialTheme.typography.labelMedium, color = x.subtle,
     )
     Spacer(Modifier.height(6.dp))

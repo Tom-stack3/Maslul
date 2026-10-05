@@ -3,6 +3,9 @@ package com.maslul.app.data
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Instant
 import java.time.LocalDate
 
@@ -15,6 +18,9 @@ data class LineDetail(
     /** Transitous stop id of the first stop, to look up trips departing from it. */
     val firstStopId: String? = null,
 )
+
+/** No driving route between the places of a [RideOffer]. */
+class NoDriveException : IllegalStateException("Couldn't find a driving route for this ride.")
 
 /** Neither the line's own day nor recent days have stop data for it. */
 class LineUnavailableException : IllegalStateException("No stop data for this line right now. Please try again later.")
@@ -52,6 +58,10 @@ class TransitRepository(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<Leg>>?) = size > 60
     }
 
+    private val carCache = object : LinkedHashMap<String, Leg>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Leg>?) = size > 24
+    }
+
     var language: String? = null
 
     // ---- Places ---------------------------------------------------------------------
@@ -87,6 +97,8 @@ class TransitRepository(
      * so an option can offer every line that makes the same hop. Cached per 15-minute bucket.
      */
     suspend fun rideAlternatives(leg: Leg, modes: Set<TransitMode>): List<Leg> {
+        // The user's own shuttle isn't in the open data; its timetable is (see [ShuttleSchedule]).
+        if (leg.shuttleId != null) return emptyList()
         val key = rideBucket(leg)
         synchronized(rideCache) { rideCache[key] }?.let { return it }
         val req = TransitousApi.PlanRequest(
@@ -118,6 +130,7 @@ class TransitRepository(
      * is if it's missed. Looks up to an hour ahead; cached per ride.
      */
     suspend fun ridesAfter(leg: Leg, modes: Set<TransitMode>): List<Leg> {
+        if (leg.shuttleId != null) return emptyList()
         val key = "after|${leg.from.stopId ?: leg.from.point}|${leg.to.stopId ?: leg.to.point}|${leg.start.epochSecond}"
         synchronized(rideCache) { rideCache[key] }?.let { return it }
         val req = TransitousApi.PlanRequest(
@@ -140,6 +153,283 @@ class TransitRepository(
             .let { Combine.ridesAfter(leg.copy(alternatives = emptyList()), it, count = 5) }
         synchronized(rideCache) { rideCache[key] = rides }
         return rides
+    }
+
+    // ---- Rides, shuttles and being on board --------------------------------------------
+
+    /** Driving route from [from] to [to] (a single car leg with its geometry), leaving at [at]. */
+    suspend fun carRoute(from: GeoPoint, to: GeoPoint, at: Instant? = null): Leg? {
+        val key = "%.4f,%.4f>%.4f,%.4f".format(from.lat, from.lon, to.lat, to.lon)
+        synchronized(carCache) { carCache[key] }?.let { c ->
+            // Same road; only the times move.
+            val shift = at?.let { it.epochSecond - c.start.epochSecond } ?: 0
+            return c.copy(start = c.start.plusSeconds(shift), end = c.end.plusSeconds(shift))
+        }
+        val req = TransitousApi.PlanRequest(
+            from = from, to = to, time = at, directModes = "CAR", maxDirectMinutes = 6 * 60, directOnly = true, numItineraries = 1,
+            language = language,
+        )
+        val car = transitous.plan(req).carOnly?.legs?.firstOrNull { it.mode == TransitMode.CAR } ?: return null
+        synchronized(carCache) { carCache[key] = car }
+        return car
+    }
+
+    /**
+     * Options for a lift with a driver heading to [driverDest]: get out at the drop-off along the
+     * way that gets you to [req]'s destination best, then continue by transit. [score] ranks.
+     */
+    suspend fun rideAlong(
+        req: TransitousApi.PlanRequest,
+        driverDest: GeoPoint,
+        score: (Itinerary) -> Double,
+        /** The options found so far, each time a drop-off is done: the first ones show while the rest load. */
+        progress: (List<Itinerary>) -> Unit = {},
+    ): List<Itinerary> = coroutineScope {
+        val leave = (req.time ?: Instant.now()).truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+        val route = carRoute(req.from, driverDest, leave) ?: throw NoDriveException()
+        val found = Found(score, progress)
+        val gate = Semaphore(FAN_OUT)
+        // The likeliest drop-offs first (by where you're going, and the driver's end), so they show soonest.
+        RidePlanner.dropOffs(route, req.to).withIndex()
+            .sortedBy { (_, d) -> GeoMath.distance(d.point, req.to) }
+            .map { (i, drop) ->
+                async {
+                    gate.withPermit {
+                        val car = RidePlanner.carLeg(route, drop, leave)
+                        val r = onward(req.copy(from = drop.point, fromStopId = null, time = car.end.plusSeconds(RidePlanner.STOP_SEC)))
+                            ?: return@withPermit
+                        val walk = r.walkOnly?.takeIf { it.durationSec <= req.maxWalkMinutes * 60L }
+                        found.add((r.itineraries.sortedBy(score).take(3) + listOfNotNull(walk)).map { RidePlanner.compose(car, it, "ride$i:${it.id}") })
+                    }
+                }
+            }.awaitAll()
+        found.result()
+    }
+
+    /** Options gathered from several starting points, reported as they come in (see [rideAlong], [planOnBoard]). */
+    private class Found(private val score: (Itinerary) -> Double, private val progress: (List<Itinerary>) -> Unit) {
+        private val all = ArrayList<Itinerary>()
+
+        fun add(options: List<Itinerary>) {
+            if (options.isEmpty()) return
+            val now = synchronized(all) { all += options; result() }
+            progress(now)
+        }
+
+        fun result(): List<Itinerary> = synchronized(all) { RidePlanner.distinct(RidePlanner.inReach(all.toList()), score) }
+    }
+
+    /** Trips that take one of the user's [shuttles] between [req]'s endpoints. */
+    suspend fun shuttleOptions(req: TransitousApi.PlanRequest, shuttles: List<Shuttle>, now: Instant = Instant.now()): List<Itinerary> =
+        coroutineScope {
+            ShuttleSchedule.relevant(shuttles, req.from, req.to)
+                .map { s -> async { runCatching { shuttleOptions(req, s, now) }.getOrDefault(emptyList()) } }
+                .awaitAll().flatten()
+        }
+
+    /**
+     * Up to two trips riding [s]: getting to it (planned to arrive just before it leaves), the
+     * shuttle, and on from it; with its next departures as alternatives.
+     */
+    private suspend fun shuttleOptions(req: TransitousApi.PlanRequest, s: Shuttle, now: Instant): List<Itinerary> = coroutineScope {
+        val geometry = async { runCatching { carRoute(s.from.point, s.to.point)?.geometry }.getOrNull().orEmpty() }
+        val t = req.time ?: now
+        val accessM = GeoMath.distance(req.from, s.from.point)
+        val walkSec = (accessM * 1.3 / req.walkSpeedMps).toLong()
+        // A lower bound on getting to the shuttle, so departures that can't be made aren't tried.
+        val reachSec = when {
+            ShuttleSchedule.isNear(req.from, s.from.point) -> 0L
+            walkSec <= req.maxWalkMinutes * 60L -> walkSec
+            else -> (accessM / 20).toLong()
+        }
+        val ride = s.rideMinutes * 60L
+        val departures = if (req.arriveBy) ShuttleSchedule.departures(s, t.minusSeconds(4 * 3600L), t.minusSeconds(ride)).reversed()
+            else ShuttleSchedule.departures(s, t.plusSeconds(reachSec), t.plusSeconds(4 * 3600L))
+        val out = ArrayList<Itinerary>()
+        for (dep in departures.take(2)) {
+            val leg = ShuttleSchedule.leg(s, dep)
+            val access = async { accessTo(req, s, dep) }
+            val egress = async { egressFrom(req, s, leg.end, if (req.arriveBy) t else null) }
+            val a = access.await() ?: continue
+            val e = egress.await() ?: continue
+            // Leaving after now (or the chosen time), arriving in time.
+            if ((a.firstOrNull()?.start ?: dep).isBefore((if (req.arriveBy) now else t).minusSeconds(60))) continue
+            val legs = a + leg + e
+            out += Itinerary("shuttle:${s.id}:${dep.epochSecond}", legs.first().start, legs.last().end,
+                legs.count { it.mode.isTransit } - 1, legs)
+            if (out.size >= 2) break
+        }
+        val path = geometry.await()
+        val later = ShuttleSchedule.departures(s, out.minOfOrNull { it.start } ?: t, t.plusSeconds(5 * 3600L))
+            .map { ShuttleSchedule.leg(s, it, path) }
+        // Two shuttles making the same connection: the later one, with less waiting at the other end.
+        out.groupBy { itin -> itin.transitLegs.filter { it.shuttleId == null }.map { it.rideKey } }
+            .values.map { g -> g.maxBy { it.legs.first().start } }
+            .map { itin ->
+            val i = itin.legs.indexOfFirst { it.shuttleId == s.id }
+            val drawn = if (path.isEmpty()) itin else itin.copy(legs = itin.legs.toMutableList().also { it[i] = it[i].copy(geometry = path) })
+            Combine.addAlternatives(drawn, i, later, now)
+        }
+    }
+
+    /**
+     * The next few ways on from [req]'s start at its time, for one of several starting points tried
+     * (drop-offs, stops to get off at). Transitous serves a client's requests one at a time, so
+     * these go [FAN_OUT] at once and are kept small; one that stalls is given up on.
+     */
+    private suspend fun onward(req: TransitousApi.PlanRequest, count: Int = 3): PlanResult? =
+        withTimeoutOrNull(ONWARD_TIMEOUT_MS) {
+            runCatching {
+                plan(req.copy(arriveBy = false, pageCursor = null, numItineraries = count, searchWindowSec = 20 * 60))
+            }.getOrNull()
+        }
+
+    /** Getting to [s]'s first stop by [dep] (latest start first): no legs when you're there already, null when it can't be made. */
+    private suspend fun accessTo(req: TransitousApi.PlanRequest, s: Shuttle, dep: Instant): List<Leg>? {
+        if (ShuttleSchedule.isNear(req.from, s.from.point)) return emptyList()
+        val by = dep.minusSeconds(60)
+        val r = plan(req.copy(to = s.from.point, toStopId = null, time = by, arriveBy = true, pageCursor = null, numItineraries = 3))
+        // A direct walk comes timed from the request; walk so as to arrive just before the shuttle.
+        val walk = r.walkOnly?.takeIf { it.durationSec <= req.maxWalkMinutes * 60L }?.let { shifted(it, by.epochSecond - it.end.epochSecond) }
+        return (r.itineraries + listOfNotNull(walk))
+            .filter { !it.legs.last().end.isAfter(dep) }
+            .maxWithOrNull(compareBy<Itinerary> { it.legs.first().start }.thenBy { -it.transfers })
+            ?.legs
+    }
+
+    /** From [s]'s last stop to the destination, leaving at [arrive] (and in by [by] when given). */
+    private suspend fun egressFrom(req: TransitousApi.PlanRequest, s: Shuttle, arrive: Instant, by: Instant?): List<Leg>? {
+        if (ShuttleSchedule.isNear(s.to.point, req.to)) return emptyList()
+        val r = plan(req.copy(from = s.to.point, fromStopId = null, time = arrive.plusSeconds(60), arriveBy = false, pageCursor = null,
+            numItineraries = 3))
+        val walk = r.walkOnly?.takeIf { it.durationSec <= req.maxWalkMinutes * 60L }?.let { shifted(it, arrive.epochSecond - it.start.epochSecond) }
+        return (r.itineraries + listOfNotNull(walk))
+            .filter { by == null || !it.legs.last().end.isAfter(by) }
+            .minByOrNull { Ranking.score(it, false, req.walkSpeedMps) }
+            ?.legs
+    }
+
+    private fun shifted(itin: Itinerary, sec: Long) = itin.copy(
+        start = itin.start.plusSeconds(sec), end = itin.end.plusSeconds(sec),
+        legs = itin.legs.map { it.copy(start = it.start.plusSeconds(sec), end = it.end.plusSeconds(sec)) },
+    )
+
+    /** Rides you might be on at [here]: timetable rides due around now at the stops around you, and live vehicles close by. */
+    suspend fun boardCandidates(here: GeoPoint, now: Instant = Instant.now()): List<BoardCandidate> = coroutineScope {
+        val snapshot = async { live.snapshot() }
+        val stops = runCatching { transitous.nearbyStops(here, 0.01) }.getOrDefault(emptyList())
+            .filter { it.stopId != null && GeoMath.distance(here, it.point) <= OnBoard.STOP_RADIUS_M }
+            .take(8)
+        val departures = stops.map { st ->
+            async {
+                val d = GeoMath.distance(here, st.point)
+                runCatching {
+                    transitous.stopTimes(st.stopId!!, now.minusSeconds(OnBoard.BEFORE_SEC), count = 40, language = language,
+                        windowSec = OnBoard.BEFORE_SEC + OnBoard.AFTER_SEC)
+                }.getOrDefault(emptyList()).map { d to it }
+            }
+        }.awaitAll().flatten()
+        val byLine = snapshot.await()?.byLine.orEmpty()
+        val timetabled = OnBoard.fromDepartures(here, departures, byLine, now)
+        val matched = timetabled.mapNotNull { it.vehicle }.toSet()
+        val loose = OnBoard.nearVehicles(here, byLine, now).filter { it !in matched }.take(20)
+        // Live vehicles the timetable didn't account for (e.g. on a highway): named from their line.
+        val routes = if (loose.isEmpty()) emptyMap() else runCatching {
+            val refs = loose.mapNotNull { it.lineRef.toLongOrNull() }.distinct()
+            val today = LocalDate.now(IsraelZone)
+            stride.routesByLineRef(refs, today).ifEmpty { stride.routesByLineRef(refs, today.minusDays(1)) }
+        }.getOrDefault(emptyList()).associateBy { it.lineRef.toString() }
+        val tracked = loose.mapNotNull { v ->
+            val r = routes[v.lineRef] ?: return@mapNotNull null
+            BoardCandidate(null, v.lineRef, r.label, r.mode, OnBoard.placeName(r.destination), r.agency, r.operatorRef.toString(), null, v,
+                GeoMath.distance(here, v.point))
+        }
+        OnBoard.rank(timetabled + tracked, now)
+    }
+
+    /** The Transitous trip of [c] (a live vehicle's, found through the stop it's heading to), or null. */
+    suspend fun boardTripId(c: BoardCandidate, now: Instant = Instant.now()): String? {
+        c.tripId?.let { return it }
+        val v = c.vehicle ?: return null
+        val nearby = runCatching { transitous.nearbyStops(v.point, 0.02) }.getOrDefault(emptyList())
+        val next = v.nextStopCode?.let { code -> nearby.firstOrNull { it.subtitle?.substringBefore(" ") == "#$code" } }
+        for (stop in (listOfNotNull(next) + nearby.take(3)).distinctBy { it.stopId }) {
+            val stopId = stop.stopId ?: continue
+            val deps = runCatching {
+                transitous.stopTimes(stopId, now.minusSeconds(90 * 60), count = 60, language = language, windowSec = 3 * 3600L)
+            }.getOrDefault(emptyList())
+            val sameLine = deps.filter { TripIds.lineRef(it.routeId) == v.lineRef }
+            val match = sameLine.firstOrNull { TripIds.parse(it.tripId)?.tripNumber == v.journeyRef }
+                ?: sameLine.firstOrNull { d ->
+                    TripIds.parse(d.tripId)?.let { Math.abs(it.originDeparture.epochSecond - v.originDeparture.epochSecond) < 60 } == true
+                }
+            if (match != null) return match.tripId
+        }
+        return null
+    }
+
+    /**
+     * Ways on from the trip being ridden ([start]): staying on to one of its later stops and
+     * going on from there, or getting off at the next stop to change. The planner alone won't
+     * reliably offer staying on: from the next stop, a faster line leaving that minute beats it.
+     */
+    suspend fun planOnBoard(
+        req: TransitousApi.PlanRequest,
+        start: OnBoardStart,
+        score: (Itinerary) -> Double,
+        progress: (List<Itinerary>) -> Unit = {},
+    ): List<Itinerary> =
+        coroutineScope {
+            val trip = start.trip
+            val calls = listOf(trip.from) + trip.intermediateStops + trip.to
+            val timeline = TripTimeline.fromTrip(trip)
+            val tripId = trip.tripId
+            val found = Found(score, progress)
+            val gate = Semaphore(FAN_OUT)
+            // Every option starts on this bus, from the stop it last passed: they all start now, so they
+            // compare by when they get there (getting off to wait for a later one loses to staying on).
+            val from = (start.nextIndex - 1).coerceAtLeast(0)
+            val toNext = if (from < start.nextIndex) OnBoard.ride(trip, calls, timeline, from, start.nextIndex, tripId) else null
+            val next = calls[start.nextIndex]
+            // The stop nearest where you're going first, then changing at the next stop, then the rest.
+            val stops = OnBoard.alightStops(calls, start.nextIndex, req.to).sortedBy { GeoMath.distance(calls[it].point, req.to) }
+            val stays = stops.take(1) + listOf(-1) + stops.drop(1)
+            stays.map { k ->
+                async {
+                    gate.withPermit {
+                        if (k < 0) {
+                            // Getting off at the next stop to change there.
+                            val at = (next.scheduledArrival ?: next.scheduledDeparture ?: return@withPermit).plusSeconds(OnBoard.CHANGE_SEC)
+                            val r = onward(req.copy(fromStopId = next.stopId, time = at), count = 4) ?: return@withPermit
+                            found.add(r.itineraries.filter { it.transitLegs.none { l -> l.tripId == tripId } }.sortedBy(score).take(4)
+                                .map { c -> toNext?.let { OnBoard.compose(it, c) } ?: c })
+                            return@withPermit
+                        }
+                        val ride = OnBoard.ride(trip, calls, timeline, from, k, tripId)
+                        if (ShuttleSchedule.isNear(calls[k].point, req.to)) { found.add(listOf(OnBoard.compose(ride, null))); return@withPermit }
+                        val r = onward(req.copy(from = calls[k].point, fromStopId = calls[k].stopId, time = ride.end.plusSeconds(60)))
+                            ?: return@withPermit
+                        val walk = r.walkOnly?.takeIf { it.durationSec <= req.maxWalkMinutes * 60L }
+                        // Boarding this same trip again from a later stop is just staying on longer.
+                        found.add((r.itineraries.filter { it.transitLegs.none { l -> l.tripId == tripId } }.sortedBy(score).take(2) + listOfNotNull(walk))
+                            .map { OnBoard.compose(ride, it) })
+                    }
+                }
+            }.awaitAll()
+            found.result()
+        }
+
+    /** Where trip [tripId] (which the user is on, at [here]) goes next. */
+    suspend fun onBoardStart(tripId: String, here: GeoPoint?, now: Instant = Instant.now()): OnBoardStart? {
+        val trip = trip(tripId) ?: return null
+        val calls = listOf(trip.from) + trip.intermediateStops + trip.to
+        val timeline = TripTimeline.fromTrip(trip)
+        val parsed = TripIds.parse(tripId)
+        val v = trip.lineRef?.let { live.vehiclesForLine(it) }.orEmpty().forTrip(parsed?.tripNumber, parsed?.originDeparture)
+        val origin = trip.from.scheduledTime ?: parsed?.originDeparture
+        val progress = if (timeline != null && v != null && origin != null) timeline.estimate(v, origin, now) else null
+        val i = OnBoard.nextStop(calls, timeline, here, progress, now)
+        return OnBoardStart(trip.copy(tripId = tripId), i, calls[i])
     }
 
     suspend fun trip(tripId: String): Leg? {
@@ -421,6 +711,10 @@ class TransitRepository(
     }
 
     companion object {
+        /** Requests at once when trying several starting points (see [onward]). */
+        private const val FAN_OUT = 2
+        private const val ONWARD_TIMEOUT_MS = 15_000L
+
         /** How far back to look for late trips whose scheduled time at a stop already passed. */
         const val LATE_WINDOW_SEC = 90 * 60L
 

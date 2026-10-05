@@ -159,7 +159,8 @@ object Combine {
     fun reachBy(itin: Itinerary, legIndex: Int, now: Instant, hurry: Boolean = false, liveOf: (Leg) -> LiveCall? = { null }): Instant {
         val before = itin.legs.subList(0, legIndex.coerceIn(0, itin.legs.size))
         val prev = before.indexOfLast { it.mode.isTransit }
-        val walk = before.drop(prev + 1).sumOf { it.durationSec }.let { if (hurry) (it * HURRY_SHARE).toLong() else it }
+        // Hurrying speeds up walking, not a car ride.
+        val walk = before.drop(prev + 1).sumOf { if (hurry && it.mode == TransitMode.WALK) (it.durationSec * HURRY_SHARE).toLong() else it.durationSec }
         return (if (prev >= 0) maxOf(arrives(before[prev], liveOf(before[prev])), now) else now).plusSeconds(walk)
     }
 
@@ -180,7 +181,9 @@ object Combine {
             legs[i] = l.copy(start = s, end = maxOf(arrives(l, c), s))
         }
         // Walks to the first ride end as it boards; every other walk starts when the ride before it gets in.
+        // A driver heading somewhere leaves when they do, so their lift (and anything before it) stays put.
         for (i in transit.first() - 1 downTo 0) {
+            if (legs[i].fixed) break
             val next = legs[i + 1].start
             legs[i] = legs[i].copy(start = next.minusSeconds(legs[i].durationSec), end = next)
         }
@@ -284,12 +287,14 @@ object Combine {
         val swapped = choice.copy(alternatives = others)
         val firstTransit = itin.legs.indexOfFirst { it.mode.isTransit }
         val lastTransit = itin.legs.indexOfLast { it.mode.isTransit }
+        // A driver heading somewhere leaves when they do: only the walk after their lift moves.
+        val lift = itin.legs.subList(0, firstTransit.coerceAtLeast(0)).indexOfLast { it.fixed }
         val dStart = choice.start.epochSecond - leg.start.epochSecond
         val dEnd = choice.end.epochSecond - leg.end.epochSecond
         val legs = itin.legs.mapIndexed { i, l ->
             when {
                 i == legIndex -> swapped
-                i < legIndex && legIndex == firstTransit -> l.shift(dStart)
+                i < legIndex && legIndex == firstTransit && i > lift -> l.shift(dStart)
                 i > legIndex && legIndex == lastTransit -> l.shift(dEnd)
                 else -> l
             }

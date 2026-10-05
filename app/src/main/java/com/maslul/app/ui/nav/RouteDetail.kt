@@ -65,6 +65,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -129,7 +130,6 @@ class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: P
     /** The itinerary with the line picked on each combined leg (initially the best one). */
     var itinerary by mutableStateOf(original)
         private set
-    private var transfers = Ranking.transfers(original, store.data.value.settings.walkSpeed.mps)
     /** Rides found after each transfer leg's (by leg index), for the wait if it's missed; null while looking. */
     private val after = mutableStateMapOf<Int, List<Leg>?>()
 
@@ -155,8 +155,12 @@ class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: P
     /** Live state of the ride currently chosen on leg [i]. */
     fun live(i: Int): LiveCall? = itinerary.legs.getOrNull(i)?.takeIf { it.mode.isTransit }?.let { rideLive[it.rideKey] }
 
-    /** A tight connection onto [leg], if the previous vehicle leaves little spare time. */
-    fun tightTransferInto(leg: Leg) = transfers.firstOrNull { it.next === leg && it.tight }
+    /** The trip as the rides are expected to run (late ones included): what its times show. */
+    fun expected(): Itinerary = Combine.expected(itinerary) { rideLive[it.rideKey] }
+
+    /** A tight connection onto [leg], if the previous vehicle (as expected to run) leaves little spare time. */
+    fun tightTransferInto(leg: Leg) =
+        Ranking.transfers(expected(), store.data.value.settings.walkSpeed.mps).firstOrNull { it.next.rideKey == leg.rideKey && it.tight }
 
     /** Legs whose ride the user picked by hand; the others follow whichever bus gets there first. */
     private val picked = HashSet<Int>()
@@ -169,7 +173,6 @@ class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: P
 
     private fun switchTo(i: Int, option: Leg) {
         itinerary = Combine.choose(itinerary, i, option)
-        transfers = Ranking.transfers(itinerary, store.data.value.settings.walkSpeed.mps)
         approach.remove(i)
         rideLive[option.rideKey]?.let { call -> scope.launch { updateApproach(i, itinerary.legs[i], call) } }
     }
@@ -187,9 +190,10 @@ class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: P
             itinerary.legs.forEachIndexed { i, chosen ->
                 if (!chosen.mode.isTransit) return@forEachIndexed
                 // Every line of a combined leg, so their buses and arrivals can be compared.
-                chosen.options.filter { it.end.isAfter(now.minusSeconds(300)) }.forEach { leg ->
+                chosen.options.forEach { leg ->
                     scope.launch {
-                        val call = runCatching { repo.legLive(leg, now) }.getOrNull() ?: return@launch
+                        val call = runCatching { if (repo.worthLive(leg, now, graceSec = 300)) repo.legLive(leg, now) else null }
+                            .getOrNull() ?: return@launch
                         rideLive[leg.rideKey] = call
                         if (leg.rideKey == itinerary.legs.getOrNull(i)?.rideKey) updateApproach(i, leg, call)
                         pickBest()
@@ -241,7 +245,8 @@ class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: P
 
     fun share(ctx: Context) {
         val text = buildString {
-            appendLine("My trip to ${to.name}: ${Fmt.time(itinerary.start)} → ${Fmt.time(itinerary.end)} (${Fmt.duration(itinerary.durationSec)})")
+            val e = expected()
+            appendLine("My trip to ${to.name}: ${Fmt.time(e.start)} → ${Fmt.time(e.end)} (${Fmt.duration(e.durationSec)})")
             itinerary.legs.forEach { l ->
                 if (l.mode == TransitMode.WALK) {
                     if (l.durationSec >= 60) appendLine("• Walk ${Fmt.duration(l.durationSec)} to ${l.to.name.ifBlank { to.name }}")
@@ -302,7 +307,7 @@ fun RouteDetailScreen(model: RouteDetailModel) {
                 LazyColumn(Modifier.fillMaxWidth().testTag("route_detail")) {
                     item {
                         DetailHeader(
-                            model.itinerary, isActive,
+                            model.expected(), isActive,
                             onStart = { if (isActive) LiveTripService.stop(ctx) else startLive() },
                             onRemind = {
                                 if (Build.VERSION.SDK_INT >= 33) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -487,13 +492,15 @@ private fun DetailHeader(itin: Itinerary, active: Boolean, onStart: () -> Unit, 
 private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
     val x = LocalExtra.current
     val legs = model.itinerary.legs
+    // Leaving and arriving as the rides are expected to run (the stops show their own live times).
+    val expected = model.expected()
     val walkRail = RailSpec(Rail.DOTTED, x.walk)
     fun railOf(l: Leg) = if (l.mode == TransitMode.WALK) walkRail else RailSpec(Rail.SOLID, lineColor(l))
     val onSurface = MaterialTheme.colorScheme.onSurface
 
     Column {
         // Origin
-        TimelineRow(null, railOf(legs.first()), Node.ENDPOINT, onSurface, time = { TimeText(legs.first().start) }) {
+        TimelineRow(null, railOf(legs.first()), Node.ENDPOINT, onSurface, time = { TimeText(expected.start) }) {
             Text(model.from.name.takeIf { model.from.kind != PlaceKind.CURRENT_LOCATION } ?: "Your location",
                 style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
             Spacer(Modifier.height(10.dp))
@@ -541,7 +548,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
         }
         // Destination
         TimelineRow(railOf(legs.last()), null, Node.TERMINUS, MaterialTheme.colorScheme.primary,
-            time = { TimeText(legs.last().end) }) {
+            time = { TimeText(expected.end) }) {
             Text(model.to.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
             model.to.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = x.subtle) }
         }
@@ -598,7 +605,7 @@ private fun TransitSegment(model: RouteDetailModel, index: Int, leg: Leg, rail: 
         val options = Combine.catchableOptions(model.itinerary, index, now, hurry = true, liveOf = liveOf)
             .let { o -> if (o.none { it.rideKey == leg.rideKey }) o + leg else o }
         if (options.size > 1) {
-            LineOptions(leg, options, now, model.rideLive, hurry = { Combine.onlyByHurrying(model.itinerary, index, it, now, liveOf(it)) }) {
+            LineOptions(leg, options, now, model.rideLive, hurry = { Combine.onlyByHurrying(model.itinerary, index, it, now, liveOf(it), liveOf) }) {
                 model.choose(index, it)
             }
             Spacer(Modifier.height(8.dp))
@@ -704,8 +711,9 @@ private fun LineOptions(
     val x = LocalExtra.current
     val options = rides.map { it to rideLive[it.rideKey] }.sortedBy { (o, c) -> Combine.boards(o, c) }
     val lines = options.distinctBy { Combine.lineKey(it.first) }.size
+    val vehicles = TransitMode.vehiclesOf(options.map { it.first })
     Text(
-        (if (lines > 1) "${options.size} buses ride this way" else "Next ${options.size} buses of ${leg.lineLabel}") + " · tap to choose",
+        (if (lines > 1) "${options.size} $vehicles go this way" else "Next ${options.size} $vehicles of ${leg.lineLabel}") + " · tap to choose",
         style = MaterialTheme.typography.labelMedium, color = x.subtle,
     )
     Spacer(Modifier.height(6.dp))
@@ -713,7 +721,10 @@ private fun LineOptions(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
             .testTag("line_options"),
     ) {
-        options.forEach { (o, c) ->
+        // The first few (and the chosen one); the rest behind "N more".
+        var expanded by rememberSaveable(leg.from.stopId, leg.to.stopId) { mutableStateOf(false) }
+        val shown = if (expanded) options else options.filterIndexed { i, (o, _) -> i < SHOWN_RIDES || o.rideKey == leg.rideKey }
+        shown.forEach { (o, c) ->
             val chosen = o.rideKey == leg.rideKey
             val isLive = c?.status == LiveStatus.LIVE
             val dep = c?.takeIf { isLive }?.expected ?: o.start
@@ -755,6 +766,15 @@ private fun LineOptions(
                 }
                 Spacer(Modifier.width(6.dp))
             }
+        }
+        val hidden = options.size - shown.size
+        if (hidden > 0 || expanded && options.size > SHOWN_RIDES) {
+            Text(
+                if (expanded) "Show fewer" else "$hidden more",
+                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(horizontal = 14.dp, vertical = 10.dp)
+                    .testTag("more_rides"),
+            )
         }
     }
 }

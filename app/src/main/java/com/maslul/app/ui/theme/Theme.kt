@@ -55,7 +55,7 @@ object ModeColors {
         TransitMode.METRO -> Metro
         TransitMode.CABLE_CAR -> Cable
         TransitMode.FERRY -> Ferry
-        TransitMode.WALK, TransitMode.OTHER -> Other
+        TransitMode.WALK, TransitMode.OTHER, TransitMode.CAR -> Other
     }
 }
 

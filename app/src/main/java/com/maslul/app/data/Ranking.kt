@@ -28,9 +28,9 @@ object Ranking {
         var prev: Leg? = null
         var walkM = 0.0
         for (l in itin.legs) {
-            if (l.mode == TransitMode.WALK) {
+            if (!l.mode.isTransit) {
                 // MOTIS pads transfer walks with the transfer buffer, so use distance, not duration.
-                walkM += l.distanceM?.takeIf { it > 0 } ?: (GeoMath.distance(l.from.point, l.to.point) * 1.25)
+                if (l.mode == TransitMode.WALK) walkM += l.distanceM?.takeIf { it > 0 } ?: (GeoMath.distance(l.from.point, l.to.point) * 1.25)
                 continue
             }
             prev?.let { p ->

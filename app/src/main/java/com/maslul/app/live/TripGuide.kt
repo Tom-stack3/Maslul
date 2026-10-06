@@ -75,11 +75,12 @@ class TripGuide(private val itinerary: Itinerary, private val destination: Strin
             return GuideState(legIndex, "You've arrived", destination, GuideAlert.ARRIVED, "arrived", 1f, true)
         }
 
-        if (leg.mode == TransitMode.WALK) {
+        if (!leg.mode.isTransit) {
+            val verb = if (leg.mode == TransitMode.CAR) "Ride to" else "Walk to"
             val nextIdx = (legIndex + 1 until itinerary.legs.size).firstOrNull { itinerary.legs[it].mode.isTransit }
             if (nextIdx == null) {
                 val remaining = (totalM - lastAlong).coerceAtLeast(0.0)
-                return GuideState(legIndex, "Walk to $destination", "${Fmt.distance(remaining)} to go", null, null, progress, false)
+                return GuideState(legIndex, "$verb $destination", "${Fmt.distance(remaining)} to go", null, null, progress, false)
             }
             val next = itinerary.legs[nextIdx]
             val call = live[nextIdx]
@@ -90,7 +91,7 @@ class TripGuide(private val itinerary: Itinerary, private val destination: Strin
                 (mins?.let { if (it <= 0) "is arriving$liveTag" else "in $it min$liveTag" } ?: "at ${Fmt.time(next.start)}")
             val soon = mins != null && mins in 0..3
             return GuideState(
-                legIndex, "Walk to ${next.from.name}", text,
+                legIndex, if (leg.mode == TransitMode.CAR) "Get dropped off near ${next.from.name}" else "Walk to ${next.from.name}", text,
                 if (soon) GuideAlert.BOARD_SOON else null, if (soon) "board-$nextIdx" else null, progress, false,
             )
         }

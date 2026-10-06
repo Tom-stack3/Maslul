@@ -73,4 +73,16 @@ class TripGuideTest {
         assertEquals(1, s.legIndex)
         assertEquals(GuideAlert.GET_OFF_NEXT, s.alert)
     }
+
+    @Test
+    fun aLiftReadsAsARideNotAWalk() {
+        // A 3 km lift, then the bus from A.
+        val car = walk.copy(mode = TransitMode.CAR, from = StopCall(null, "", null, pt(-3.0).lat, pt(-3.0).lon, null, null),
+            start = t0.minusSeconds(300), distanceM = 3000.0, geometry = listOf(pt(-3.0), pt(-0.3)), fixed = true)
+        val g = TripGuide(Itinerary("c", car.start, bus.end, 0, listOf(car, walk, bus)), "Home")
+        val s = g.update(pt(-2.0), t0.minusSeconds(200), emptyMap())
+        assertEquals(0, s.legIndex)
+        assertEquals("Get dropped off near A", s.title)
+        assertEquals("Walk to A", g.update(pt(-0.2), t0.plusSeconds(100), emptyMap()).title)
+    }
 }

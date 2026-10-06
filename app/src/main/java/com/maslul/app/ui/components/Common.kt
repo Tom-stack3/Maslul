@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.rounded.DirectionsWalk
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.DirectionsBoat
 import androidx.compose.material.icons.rounded.DirectionsBus
+import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.DirectionsRailway
 import androidx.compose.material.icons.rounded.DirectionsSubway
 import androidx.compose.material.icons.rounded.Place
@@ -75,6 +76,7 @@ fun modeIcon(mode: TransitMode): ImageVector = when (mode) {
     TransitMode.CABLE_CAR -> Icons.Rounded.AirlineSeatReclineNormal
     TransitMode.FERRY -> Icons.Rounded.DirectionsBoat
     TransitMode.OTHER -> Icons.Rounded.Commute
+    TransitMode.CAR -> Icons.Rounded.DirectionsCar
 }
 
 fun modeName(mode: TransitMode): String = when (mode) {
@@ -86,6 +88,7 @@ fun modeName(mode: TransitMode): String = when (mode) {
     TransitMode.CABLE_CAR -> "Cable car"
     TransitMode.FERRY -> "Ferry"
     TransitMode.OTHER -> "Transit"
+    TransitMode.CAR -> "Car"
 }
 
 /**
@@ -261,6 +264,7 @@ fun PlaceRow(
     icon: ImageVector = Icons.Rounded.Place,
     iconTint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     modifier: Modifier = Modifier,
+    subtitleColor: Color = LocalExtra.current.subtle,
     trailing: @Composable (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
@@ -282,7 +286,7 @@ fun PlaceRow(
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = LocalExtra.current.subtle,
+                    color = subtitleColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

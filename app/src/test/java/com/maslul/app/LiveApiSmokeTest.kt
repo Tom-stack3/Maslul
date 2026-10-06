@@ -131,7 +131,11 @@ class LiveApiSmokeTest {
                     println("$q ${variant.gtfsRouteId} dir ${variant.direction}: ${d.stops.size} stops, ${d.rides.size} rides, shape ${d.shape.size}")
                     assertTrue(d.stops.size >= 2)
                     assertTrue(d.stops.zipWithNext().all { (a, b) -> a.sequence < b.sequence && a.offsetSec <= b.offsetSec })
-                    if (d.rides.isNotEmpty()) assertTrue("shape for ${variant.gtfsRouteId}", d.shape.size >= 2)
+                    // Its shape comes from a ride's trip. Overnight, before the day's timetable is out, a line can have
+                    // only yesterday's rides, whose trips have gone (the map then draws through the stops).
+                    val current = d.rides.any { it.departure.isAfter(java.time.Instant.now().minus(java.time.Duration.ofHours(12))) }
+                    if (current) assertTrue("shape for ${variant.gtfsRouteId}", d.shape.size >= 2)
+                    assertTrue(d.timeline.line.size >= 2)
                 }
             }
         }

@@ -20,10 +20,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +34,8 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.DirectionsWalk
 import androidx.compose.material.icons.automirrored.rounded.Accessible
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.DirectionsCar
+import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Star
@@ -50,6 +54,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SegmentedButton
@@ -68,6 +73,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -99,6 +105,12 @@ import com.maslul.app.data.LiveStatus
 import com.maslul.app.data.Place
 import com.maslul.app.data.PlaceKind
 import com.maslul.app.data.RailPreference
+import com.maslul.app.data.NoDriveException
+import com.maslul.app.data.PlanResult
+import com.maslul.app.data.RideOffer
+import com.maslul.app.data.RidePlanner
+import com.maslul.app.data.ShuttleSchedule
+import com.maslul.app.data.OnBoardStart
 import com.maslul.app.data.Ranking
 import com.maslul.app.data.Settings
 import com.maslul.app.data.SavedTrip
@@ -123,6 +135,7 @@ import com.maslul.app.ui.components.modeIcon
 import com.maslul.app.ui.components.modeName
 import com.maslul.app.ui.theme.LocalExtra
 import com.maslul.app.ui.theme.Numeric
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -142,6 +155,10 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
     var time by mutableStateOf<ZonedDateTime?>(null)
 
     var loading by mutableStateOf(false)
+    /** Options are showing but more are still being looked for (a lift's drop-offs, stops to get off at). */
+    var refining by mutableStateOf(false)
+        private set
+    private var searchJob: kotlinx.coroutines.Job? = null
     var error by mutableStateOf<String?>(null)
     var itineraries by mutableStateOf<List<Itinerary>>(emptyList())
     var walkOnly by mutableStateOf<Itinerary?>(null)
@@ -165,6 +182,17 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
     /** The endpoints of the current results, to tell a refresh from a new search. */
     private var searchedFrom: String? = null
     private var searchedTo: String? = null
+    /** A lift for the first part of the trip, if someone's giving one. */
+    var ride by mutableStateOf<RideOffer?>(null)
+        private set
+    /** On board: the trip being ridden and its next stop, where planning starts. */
+    private var boardStart: OnBoardStart? = null
+    /** Whether there are earlier / later results to page to. */
+    var canPage by mutableStateOf(false)
+        private set
+
+    /** The trip the user is on, when planning from a bus or train they're riding. */
+    val onBoardTripId: String? get() = from.takeIf { it.kind == PlaceKind.ON_BOARD }?.tripId
 
     init { search() }
 
@@ -178,7 +206,9 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
         return Ranking.rank(Combine.merge(best), arriveBy, walkMps, rail).map { itin ->
             itin.legs.indices.fold(itin) { acc, i ->
                 val found = rides[TransitRepository.rideBucket(acc.legs[i])]
-                if (found == null || !acc.legs[i].mode.isTransit) acc else Combine.addAlternatives(acc, i, found, now)
+                // Already on board: there's no other bus to take for this part.
+                val ridden = acc.legs[i].tripId != null && acc.legs[i].tripId == onBoardTripId
+                if (found == null || !acc.legs[i].mode.isTransit || ridden) acc else Combine.addAlternatives(acc, i, found, now)
             }
         }
     }
@@ -187,7 +217,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
     private suspend fun findAlternatives() {
         val modes = store.data.value.settings.modes
         val legs = itineraries.take(8).flatMap { it.transitLegs }
-            .filter { it.from.stopId != null && it.to.stopId != null }
+            .filter { it.from.stopId != null && it.to.stopId != null && (it.tripId == null || it.tripId != onBoardTripId) }
             .distinctBy { TransitRepository.rideBucket(it) }
             .filter { TransitRepository.rideBucket(it) !in rides }
         if (legs.isEmpty()) return
@@ -203,9 +233,12 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
     /** For each top option's tight transfer, looks up the rides after it: the wait if it's missed. */
     private suspend fun findRidesAfter() {
         val modes = store.data.value.settings.modes
-        val legs = itineraries.take(8).mapNotNull { riskiest(it)?.next }
+        val (own, legs) = itineraries.take(8).mapNotNull { riskiest(it)?.next }
             .distinctBy { it.rideKey }
             .filter { it.rideKey !in after }
+            .partition { it.shuttleId != null }
+        // The user's shuttles: their own timetable says what comes next.
+        own.forEach { l -> ShuttleSchedule.ridesAfter(store.data.value.shuttles, l)?.let { after[l.rideKey] = it } }
         coroutineScope {
             legs.map { l -> async { runCatching { l.rideKey to repo.ridesAfter(l, modes) }.getOrNull() } }
                 .awaitAll().filterNotNull().forEach { (k, v) -> after[k] = v }
@@ -224,22 +257,35 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
         val f = fromPoint ?: return null
         val t = toPoint ?: return null
         val s = store.data.value.settings
+        val board = boardStart?.next.takeIf { onBoardTripId != null }
+        val within = ride as? RideOffer.Within
         return TransitousApi.PlanRequest(
             from = f,
             to = t,
-            time = if (timeMode == TimeMode.NOW) null else time?.toInstant(),
-            arriveBy = timeMode == TimeMode.ARRIVE,
+            time = when {
+                // On board: from the next stop, when the timetable has the bus there.
+                board != null -> (board.scheduledTime ?: Instant.now()).minusSeconds(60)
+                timeMode == TimeMode.NOW -> null
+                else -> time?.toInstant()
+            },
+            // A driver heading somewhere leaves at the time given, whichever way it was set.
+            arriveBy = board == null && ride !is RideOffer.ToPlace && timeMode == TimeMode.ARRIVE,
             modes = s.modes,
             walkSpeedMps = s.walkSpeed.mps,
             maxWalkMinutes = s.maxWalkMinutes,
             wheelchair = s.wheelchair,
             pageCursor = cursor,
+            fromStopId = board?.stopId,
+            preTransitModes = within?.let { "CAR_DROPOFF" },
+            maxPreTransitMinutes = within?.minutes,
+            directModes = within?.let { "WALK,CAR" },
+            maxDirectMinutes = within?.minutes,
         )
     }
 
     /** A refreshed "leave now" search keeps options whose live first bus can still be caught, if only by hurrying. */
     private fun stillCatchable(now: Instant): List<Itinerary> {
-        if (timeMode != TimeMode.NOW) return emptyList()
+        if (timeMode != TimeMode.NOW || ride != null || onBoardTripId != null) return emptyList()
         return itineraries.filter { itin ->
             val first = itin.firstTransit ?: return@filter false
             val i = itin.legs.indexOf(first)
@@ -253,7 +299,10 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
         val keptLive = keep.mapNotNull { it.firstTransit?.rideKey }.associateWith { rideLive[it] }
         searchedFrom = from.key
         searchedTo = to.key
-        scope.launch {
+        // A newer search replaces one still running (a lift's or on-board search can take a while).
+        searchJob?.cancel()
+        refining = false
+        searchJob = scope.launch {
             // New results start at the top.
             listState.scrollToItem(0)
             loading = true
@@ -265,26 +314,43 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             live.clear()
             rideLive.clear()
             searchedAt = Instant.now()
-            fromPoint = resolve(from)
+            canPage = false
+            boardStart = null
+            val boardTrip = onBoardTripId
+            fromPoint = if (boardTrip != null) boardFrom(boardTrip) else resolve(from)
             toPoint = resolve(to)
             if (fromPoint == null || toPoint == null) {
-                error = "Your location isn't available. Allow location access or choose a starting point."
+                error = if (boardTrip != null) "Couldn't follow the ride you're on. Pick it again, or choose a starting point."
+                    else "Your location isn't available. Allow location access or choose a starting point."
                 loading = false
                 return@launch
             }
             keptLive.forEach { (k, c) -> if (c != null) rideLive[k] = c }
+            // The user's own shuttles, looked up alongside (for plain trips).
+            val shuttles = store.data.value.shuttles
+            val shuttleReq = request()
+            val shuttleOptions: Deferred<List<Itinerary>>? = if (shuttles.isNotEmpty() && ride == null && boardTrip == null && shuttleReq != null) {
+                async { runCatching { repo.shuttleOptions(shuttleReq, shuttles) }.getOrDefault(emptyList()) }
+            } else null
             runCatching { planWithRail() }
                 .onSuccess { r ->
-                    val ids = r.itineraries.map { it.id }.toSet()
-                    raw = r.itineraries + keep.filter { it.id !in ids }
+                    val found = r.itineraries + listOfNotNull(r.carOnly)
+                    val ids = found.map { it.id }.toSet()
+                    raw = found + keep.filter { it.id !in ids }
                     itineraries = ranked(raw)
-                    walkOnly = r.walkOnly?.takeIf { it.durationSec < 45 * 60 }
+                    walkOnly = r.walkOnly?.takeIf { it.durationSec < 45 * 60 && ride == null }
                     nextCursor = r.nextCursor
                     prevCursor = r.previousCursor
-                    if (r.itineraries.isEmpty() && walkOnly == null) error = "No routes found for this time."
+                    canPage = nextCursor != null || prevCursor != null
+                    if (found.isEmpty() && walkOnly == null) error = "No routes found for this time."
                 }
-                .onFailure { error = "Couldn't load routes. Check your connection." }
+                .onFailure { e -> error = if (e is NoDriveException) e.message else "Couldn't load routes. Check your connection." }
             loading = false
+            shuttleOptions?.await()?.takeIf { it.isNotEmpty() }?.let { extra ->
+                val ids = raw.map { it.id }.toSet()
+                raw = raw + extra.filter { it.id !in ids }
+                itineraries = ranked(raw)
+            }
             refreshLive()
             findAlternatives()
             refreshLive()
@@ -296,8 +362,16 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
      * Plans the trip; when trains are preferred, also asks for rail-only options, which the
      * planner may otherwise leave out for being slower than a bus.
      */
-    private suspend fun planWithRail(): com.maslul.app.data.PlanResult = coroutineScope {
+    private suspend fun planWithRail(): PlanResult = coroutineScope {
         val req = request()!!
+        (ride as? RideOffer.ToPlace)?.let { r ->
+            val options = refined { show -> repo.rideAlong(req, r.dest.point, { Ranking.score(it, false, walkMps, rail) }, show) }
+            return@coroutineScope PlanResult(options, null, null, null)
+        }
+        boardStart?.takeIf { onBoardTripId != null }?.let { start ->
+            val options = refined { show -> repo.planOnBoard(req, start, { Ranking.score(it, false, walkMps, rail) }, show) }
+            return@coroutineScope PlanResult(options, null, null, null)
+        }
         val railModes = req.modes - TransitMode.BUS
         val railOnly = if (rail != RailPreference.NONE && TransitMode.BUS in req.modes && railModes.isNotEmpty()) {
             async { runCatching { repo.plan(req.copy(modes = railModes)) }.getOrNull() }
@@ -343,7 +417,12 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
         // by when the options are expected to get there (a late bus can turn the best into the worst).
         if (timeMode == TimeMode.NOW) {
             val liveOf = { l: Leg -> rideLive[l.rideKey] }
-            itineraries = Combine.distinctRides(itineraries.map { Combine.pickBest(it, now, liveOf) })
+            val board = onBoardTripId
+            itineraries = Combine.distinctRides(itineraries.map { itin ->
+                // The bus you're on is the one you're on, whatever else comes.
+                val keep = itin.legs.indices.filter { board != null && itin.legs[it].tripId == board }.toSet()
+                Combine.pickBest(itin, now, liveOf, keep)
+            })
                 .sortedBy { Ranking.score(Combine.expected(it, liveOf), false, walkMps, rail) }
         }
         itineraries.forEach { itin -> itin.firstTransit?.let { rideLive[it.rideKey] }?.let { live[itin.id] = it } }
@@ -361,6 +440,48 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
         timeMode = TimeMode.NOW
         time = null
         search()
+    }
+
+    /** Runs a search that reports options as it finds them, showing each batch while the rest load. */
+    private suspend fun refined(run: suspend (show: (List<Itinerary>) -> Unit) -> List<Itinerary>): List<Itinerary> {
+        refining = true
+        try {
+            return run { partial ->
+                if (partial.isNotEmpty()) {
+                    // Better options come in above the ones showing: stay at the top unless the user scrolled down.
+                    val atTop = loading || listState.firstVisibleItemIndex <= 1
+                    raw = partial
+                    itineraries = ranked(partial)
+                    loading = false
+                    // After the new list is laid out, which would otherwise keep the old first card in view.
+                    if (atTop) scope.launch { delay(150); listState.scrollToItem(0) }
+                }
+            }
+        } finally {
+            refining = false
+        }
+    }
+
+    /** Where the trip you're on goes next, as the starting point (and named on the From field). */
+    private suspend fun boardFrom(tripId: String): GeoPoint? {
+        val here = runCatching { location.current() }.getOrNull() ?: location.last.value
+        val start = runCatching { repo.onBoardStart(tripId, here) }.getOrNull() ?: return null
+        boardStart = start
+        from = from.copy(subtitle = "Next stop: ${start.next.name}")
+        return start.next.point
+    }
+
+    fun useRide(r: RideOffer?) {
+        ride = r
+        search()
+    }
+
+    /** Asks where the driver is heading, then plans the lift along their way. */
+    fun pickDriverDestination() {
+        nav.push(SearchModel(nav, null, null, SearchField.TO, single = true, title = "Where's the driver going?") { p, _ ->
+            nav.pop()
+            useRide(RideOffer.ToPlace(p))
+        })
     }
 
     /** Searches again only if the options sheet changed something: closing it untouched keeps the routes. */
@@ -382,6 +503,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
     }
 
     fun swap() {
+        if (onBoardTripId != null) return
         val f = from; from = to; to = f
         search()
     }
@@ -410,6 +532,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
 fun RoutesScreen(model: RoutesModel) {
     val data by model.store.data.collectAsState()
     var showTime by remember { mutableStateOf(false) }
+    var showRide by remember { mutableStateOf(false) }
     /** The options as they were when the sheet opened (null while it's closed). */
     var optionsBefore by remember { mutableStateOf<Settings?>(null) }
     var now by remember { mutableStateOf(Instant.now()) }
@@ -448,7 +571,7 @@ fun RoutesScreen(model: RoutesModel) {
                         EndpointRow(model.to.name, hollow = false) { model.edit(SearchField.TO) }
                     }
                     Column {
-                        IconButton(onClick = model::swap) { Icon(Icons.Rounded.SwapVert, "Swap") }
+                        IconButton(onClick = model::swap, enabled = model.onBoardTripId == null) { Icon(Icons.Rounded.SwapVert, "Swap") }
                         SaveMenu(model, data)
                     }
                 }
@@ -459,13 +582,26 @@ fun RoutesScreen(model: RoutesModel) {
                         Modifier.weight(1f).horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        FilterChip(
-                            selected = model.timeMode != TimeMode.NOW,
-                            onClick = { showTime = true },
-                            label = { Text(timeLabel(model.timeMode, model.time)) },
-                            leadingIcon = { Icon(Icons.Rounded.Schedule, null, Modifier.size(18.dp)) },
-                            modifier = Modifier.testTag("time_chip"),
-                        )
+                        // On board, the trip starts when the bus gets to its next stop.
+                        if (model.onBoardTripId == null) {
+                            FilterChip(
+                                selected = model.timeMode != TimeMode.NOW,
+                                onClick = { showTime = true },
+                                label = { Text(timeLabel(model.timeMode, model.time)) },
+                                leadingIcon = { Icon(Icons.Rounded.Schedule, null, Modifier.size(18.dp)) },
+                                modifier = Modifier.testTag("time_chip"),
+                            )
+                        }
+                        // Getting a ride (טרמפ): an advanced tool, so only offered once it's switched on.
+                        if (model.ride != null || (data.settings.rides && model.onBoardTripId == null)) {
+                            FilterChip(
+                                selected = model.ride != null,
+                                onClick = { showRide = true },
+                                label = { Text(rideLabel(model.ride), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                leadingIcon = { Icon(Icons.Rounded.DirectionsCar, null, Modifier.size(18.dp)) },
+                                modifier = Modifier.widthIn(max = 200.dp).testTag("ride_chip"),
+                            )
+                        }
                         val s = data.settings
                         val custom = s.modes.size < 6 || s.maxWalkMinutes != DEFAULT_MAX_WALK_MINUTES || s.wheelchair ||
                             s.walkSpeed != WalkSpeed.NORMAL || s.railPreference != RailPreference.NONE
@@ -487,6 +623,7 @@ fun RoutesScreen(model: RoutesModel) {
             }
         }
 
+        if (model.refining && !model.loading) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp).testTag("refining"))
         when {
             model.loading -> LoadingBox(text = "Finding routes…")
             model.error != null && model.itineraries.isEmpty() && model.walkOnly == null ->
@@ -496,7 +633,7 @@ fun RoutesScreen(model: RoutesModel) {
                 state = model.listState,
                 contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp),
             ) {
-                item {
+                if (model.canPage) item {
                     TextButton(onClick = { model.more(false) }, enabled = !model.loadingMore,
                         modifier = Modifier.padding(start = 8.dp)) { Text("Earlier") }
                 }
@@ -513,9 +650,9 @@ fun RoutesScreen(model: RoutesModel) {
                     // Transfer slack as the rides are expected to run, late ones included.
                     val risk = model.riskiest(expectedOf(itin))
                     ItineraryCard(itin, model.live[itin.id], now, tags, risk, risk?.let(model::nextIfMissed),
-                        model.rideLive, onLiveClick = { model.openLive(itin) }) { model.open(itin) }
+                        model.rideLive, onLiveClick = { model.openLive(itin) }, onBoardTripId = model.onBoardTripId) { model.open(itin) }
                 }
-                item {
+                if (model.canPage) item {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                         if (model.loadingMore) LoadingBox()
                         else TextButton(onClick = { model.more(true) }) { Text("Later routes") }
@@ -539,6 +676,14 @@ fun RoutesScreen(model: RoutesModel) {
             model.setTime(mode, t)
         }
     }
+    if (showRide) {
+        RideSheet(
+            model.ride,
+            onDismiss = { showRide = false },
+            onPickDestination = { showRide = false; model.pickDriverDestination() },
+            onApply = { showRide = false; model.useRide(it) },
+        )
+    }
     optionsBefore?.let { before ->
         OptionsSheet(model, onDismiss = {
             optionsBefore = null
@@ -553,6 +698,8 @@ private fun SaveMenu(model: RoutesModel, data: UserData) {
     var open by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf<FavoriteDraft?>(null) }
     val tripSaved = data.savedTrips.any { it.from.key == model.from.key && it.to.key == model.to.key }
+    // A trip from the bus you're on now isn't one to come back to.
+    val canSaveTrip = model.from.kind != PlaceKind.ON_BOARD
     val canFavorite = model.to.kind != PlaceKind.CURRENT_LOCATION
     val favorite = data.favoriteFor(model.to)
     Box {
@@ -564,11 +711,13 @@ private fun SaveMenu(model: RoutesModel, data: UserData) {
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text(if (tripSaved) "Remove saved trip" else "Save this trip") },
-                leadingIcon = { Icon(Icons.Rounded.SwapCalls, null) },
-                onClick = { open = false; model.toggleSaved() },
-            )
+            if (canSaveTrip) {
+                DropdownMenuItem(
+                    text = { Text(if (tripSaved) "Remove saved trip" else "Save this trip") },
+                    leadingIcon = { Icon(Icons.Rounded.SwapCalls, null) },
+                    onClick = { open = false; model.toggleSaved() },
+                )
+            }
             if (canFavorite) {
                 DropdownMenuItem(
                     text = {
@@ -623,6 +772,8 @@ fun ItineraryCard(
     rideLive: Map<String, LiveCall> = emptyMap(),
     /** Tapping the live arrival line shows the vehicle on a map. */
     onLiveClick: (() -> Unit)? = null,
+    /** The trip the user is on, when planning from it: its ride reads "stay on". */
+    onBoardTripId: String? = null,
     onClick: () -> Unit,
 ) {
     val x = LocalExtra.current
@@ -666,7 +817,9 @@ fun ItineraryCard(
                 }
                 // The planned bus is live and close: you'd only make it by hurrying, so say so instead of "Missed".
                 val hurry = first != null && Combine.onlyByHurrying(itin, itin.legs.indexOf(first), first, now, live)
-                LeaveIn(leaveAt, now, live.freshness(now), hurry, first?.mode ?: TransitMode.BUS)
+                // Already on board there's nothing to leave for; nor once a driver's set off (they leave when you're in).
+                val liftLeft = itin.legs.firstOrNull()?.fixed == true && leaveAt.isBefore(now.minusSeconds(120))
+                if (onBoardTripId == null && !liftLeft) LeaveIn(leaveAt, now, live.freshness(now), hurry, first?.mode ?: TransitMode.BUS)
             }
             Spacer(Modifier.height(12.dp))
             // Buses that can still be caught on each ride (other lines, the next ones, a late earlier one),
@@ -680,9 +833,9 @@ fun ItineraryCard(
             ) {
                 val shown = itin.legs.filter { it.mode.isTransit || it.durationSec >= 60 }
                 shown.forEachIndexed { i, leg ->
-                    if (leg.mode == TransitMode.WALK) {
+                    if (!leg.mode.isTransit) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.AutoMirrored.Rounded.DirectionsWalk, null, tint = x.subtle, modifier = Modifier.size(18.dp))
+                            Icon(modeIcon(leg.mode), null, tint = x.subtle, modifier = Modifier.size(18.dp))
                             Text("${(leg.durationSec + 30) / 60}", style = MaterialTheme.typography.labelMedium, color = x.subtle)
                         }
                     } else if (lineCount(leg) > 1) {
@@ -695,11 +848,36 @@ fun ItineraryCard(
                     }
                 }
             }
+            // Where a lift drops you off: the answer this option is about.
+            itin.legs.firstOrNull { it.mode == TransitMode.CAR }?.let { car ->
+                Spacer(Modifier.height(12.dp))
+                val place = RidePlanner.dropOffName(itin)
+                HintLine(Icons.Rounded.DirectionsCar,
+                    if (first == null && place == null) "Ride all the way · ${Fmt.duration(car.durationSec)}"
+                    else "Get dropped off ${place?.let { "near $it" } ?: "on the way"}",
+                    "${Fmt.time(car.end)} · ${Fmt.duration(car.durationSec)} by car")
+            }
+            val onBoard = onBoardTripId != null
+            val stayOn = first?.tripId != null && first.tripId == onBoardTripId
+            if (onBoard && first != null) {
+                Spacer(Modifier.height(12.dp))
+                if (stayOn) {
+                    val then = itin.transitLegs.getOrNull(1)
+                    HintLine(modeIcon(first.mode), "Stay on until ${first.to.name}",
+                        "Get off ${Fmt.time(Combine.arrives(first, live))}" +
+                            (then?.let { " · then ${rideName(it)}" } ?: first.to.platformLabel?.let { " · $it" } ?: ""))
+                } else {
+                    // Where the next ride boards (it may be a stop next to the one you get off at), at its expected time.
+                    val boardAt = expected.legs.getOrNull(itin.legs.indexOf(first))?.start ?: first.start
+                    HintLine(Icons.Rounded.Place, "Get off at the next stop",
+                        "Then ${rideName(first)} from ${first.from.name} at ${Fmt.time(boardAt)}")
+                }
+            }
             // The first ride lists its next buses when there's a choice; later rides only when several lines go.
             val strips = itin.transitLegs.filter { l ->
-                if (l === first) choices[l.rideKey].orEmpty().size > 1 else lineCount(l) > 1
+                if (l === first) !onBoard && choices[l.rideKey].orEmpty().size > 1 else lineCount(l) > 1
             }
-            if (first != null && first !in strips) {
+            if (first != null && first !in strips && !onBoard) {
                 Spacer(Modifier.height(12.dp))
                 LiveLine(first.lineLabel, first.mode, listOfNotNull(first.from.name, first.from.platformLabel).joinToString(" · "), live, first.start, now, onClick = onLiveClick)
             }
@@ -721,6 +899,105 @@ fun ItineraryCard(
                     Spacer(Modifier.width(6.dp))
                     Text("Service alert on this route", style = MaterialTheme.typography.bodySmall, color = x.subtle)
                 }
+            }
+        }
+    }
+}
+
+/** A boxed one-liner on a route card: "Get dropped off near X · 07:42". */
+@Composable
+private fun HintLine(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, detail: String?) {
+    val x = LocalExtra.current
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1,
+                overflow = TextOverflow.Ellipsis)
+            detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
+    }
+}
+
+/** "Bus 480", or just "Train" for a ride whose line is named after its mode. */
+fun rideName(l: Leg): String = modeName(l.mode).let { m -> if (l.lineLabel.equals(m, ignoreCase = true)) m else "$m ${l.lineLabel}" }
+
+fun rideLabel(r: RideOffer?): String = when (r) {
+    null -> "Ride"
+    is RideOffer.ToPlace -> "Ride to ${r.dest.name}"
+    is RideOffer.Within -> "${r.minutes} min ride"
+}
+
+/**
+ * Getting a lift for the first part of the trip: either the driver is heading somewhere (get out
+ * wherever on their way is best), or they'll take you anywhere within a few minutes' drive.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun RideSheet(current: RideOffer?, onDismiss: () -> Unit, onPickDestination: () -> Unit, onApply: (RideOffer?) -> Unit) {
+    val x = LocalExtra.current
+    var minutes by remember { mutableIntStateOf((current as? RideOffer.Within)?.minutes ?: 10) }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp).navigationBarsPadding()) {
+            Text("Getting a ride (טרמפ)?", style = MaterialTheme.typography.titleLarge)
+            Text("Someone's driving you part of the way. Find the best place to get out and go on by bus or train.",
+                style = MaterialTheme.typography.bodySmall, color = x.subtle)
+            Spacer(Modifier.height(16.dp))
+            Surface(
+                onClick = onPickDestination,
+                shape = RoundedCornerShape(16.dp),
+                color = if (current is RideOffer.ToPlace) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.fillMaxWidth().testTag("ride_to_place"),
+            ) {
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Place, null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("The driver is going somewhere", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            (current as? RideOffer.ToPlace)?.let { "To ${it.dest.name} · tap to change" }
+                                ?: "Choose where they're heading; get out wherever on the way is best",
+                            style = MaterialTheme.typography.bodySmall, color = x.subtle,
+                        )
+                    }
+                    Icon(Icons.Rounded.ChevronRight, null, tint = x.subtle)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = if (current is RideOffer.Within) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Schedule, null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("The driver can take me up to…", style = MaterialTheme.typography.titleSmall)
+                            Text("Get dropped off wherever is best within that drive", style = MaterialTheme.typography.bodySmall, color = x.subtle)
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        RideOffer.MINUTES.forEach { m ->
+                            FilterChip(selected = minutes == m, onClick = { minutes = m }, label = { Text("$m min") })
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Button(onClick = { onApply(RideOffer.Within(minutes)) }, shape = CircleShape,
+                        modifier = Modifier.fillMaxWidth().height(46.dp).testTag("ride_within")) {
+                        Text("Find where to get out")
+                    }
+                }
+            }
+            if (current != null) {
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = { onApply(null) }, modifier = Modifier.fillMaxWidth()) { Text("No ride, plan as usual") }
             }
         }
     }
@@ -767,7 +1044,9 @@ fun RideOptions(
             .padding(horizontal = 12.dp, vertical = 9.dp),
     ) {
         Text(
-            (if (lines > 1) "$lines lines" else "Next ${TransitMode.vehiclesOf(options.map { it.first })}") + " from ${leg.from.name}",
+            // The user's own shuttle reads as one, not as a bus.
+            (if (lines > 1) "$lines lines" else if (options.all { it.first.shuttleId != null }) "Next shuttles"
+                else "Next ${TransitMode.vehiclesOf(options.map { it.first })}") + " from ${leg.from.name}",
             style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.height(6.dp))
@@ -1030,6 +1309,8 @@ fun OptionsSheet(model: ScreenModel, onDismiss: () -> Unit) {
                 onValueChange = { v -> model.store.updateSettings { it.copy(maxWalkMinutes = (v / 5).toInt().coerceAtLeast(1) * 5) } },
                 valueRange = 5f..30f,
                 steps = 4,
+                // Dragging from its start, by the screen's edge, mustn't count as the back gesture.
+                modifier = Modifier.systemGestureExclusion(),
             )
             Spacer(Modifier.height(8.dp))
             Text("Walking speed", style = MaterialTheme.typography.titleSmall)

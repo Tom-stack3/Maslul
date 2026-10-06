@@ -17,6 +17,7 @@ Get the latest APK from the [Releases](../../releases) page. A Play Store releas
 - Line and stop screens, favorites, trip reminders
 - Operator colors (Egged, Dan, Metropoline, …) and bus platform numbers at big stations
 - Rotatable map with a compass and a direction beam on your location
+- Optional [advanced tools](docs/advanced-features.md): find where to be dropped off when someone gives you a ride (טרמפ), add your own shuttles (like a company bus), and plan from the bus you're already on
 
 ## Data sources
 

@@ -154,4 +154,19 @@ class ParsingTest {
         assertEquals(v, vs.forTrip("586166398", null))
         assertEquals(vs[1], vs.forTrip(null, Instant.parse("2026-09-27T18:30:20Z")))
     }
+
+    @Test
+    fun aCarDropOffEndsWhenItsPaddingIsTakenBack() {
+        // MOTIS: a 12-minute drive, then a walk of -2 minutes; within a 10-minute limit.
+        val json = """{"legs":[
+            {"mode":"CAR","startTime":"2026-10-05T20:00:00Z","endTime":"2026-10-05T20:12:00Z","from":{"name":"START"},"to":{"name":""}},
+            {"mode":"WALK","startTime":"2026-10-05T20:12:00Z","endTime":"2026-10-05T20:10:00Z","from":{"name":""},"to":{"name":"Stop"}},
+            {"mode":"BUS","startTime":"2026-10-05T20:12:00Z","endTime":"2026-10-05T20:40:00Z","from":{"name":"Stop"},"to":{"name":"END"},"tripId":"t"}
+        ]}"""
+        val itin = com.maslul.app.data.AppJson.decodeFromString(com.maslul.app.data.ItineraryDto.serializer(), json).toDomain()
+        assertEquals(TransitMode.CAR, itin.legs[0].mode)
+        assertEquals(600L, itin.legs[0].durationSec)
+        assertEquals(0L, itin.legs[1].durationSec)
+        assertEquals(itin.legs[0].end, itin.legs[1].start)
+    }
 }

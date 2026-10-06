@@ -1,7 +1,9 @@
 package com.maslul.app.data
 
 import com.maslul.app.BuildConfig
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.Call
 import okhttp3.Callback
@@ -51,14 +53,20 @@ object Http {
         })
     }
 
+    /** Reads the body off the main thread: callers run there, and several requests at once would queue on it. */
     suspend fun getString(url: HttpUrl): String {
         val response = execute(Request.Builder().url(url).build())
-        response.use {
-            if (!it.isSuccessful) throw HttpException(it.code, "HTTP ${it.code} for ${url.encodedPath}")
-            return it.body!!.string()
+        return withContext(Dispatchers.IO) {
+            response.use {
+                if (!it.isSuccessful) throw HttpException(it.code, "HTTP ${it.code} for ${url.encodedPath}")
+                it.body!!.string()
+            }
         }
     }
 
-    suspend inline fun <reified T> getJson(url: HttpUrl): T =
-        AppJson.decodeFromString<T>(getString(url))
+    suspend inline fun <reified T> getJson(url: HttpUrl): T {
+        val body = getString(url)
+        // A trip's JSON (with its shape) can be large; parse it off the main thread too.
+        return withContext(Dispatchers.Default) { AppJson.decodeFromString<T>(body) }
+    }
 }

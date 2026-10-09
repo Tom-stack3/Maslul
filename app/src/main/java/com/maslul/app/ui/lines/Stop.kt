@@ -69,6 +69,7 @@ import com.maslul.app.ui.theme.ModeColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
+import com.maslul.app.i18n.S
 
 class StopModel(nav: AppNav, val place: Place) : ScreenModel(nav) {
     var entries by mutableStateOf<List<BoardEntry>>(emptyList())
@@ -76,10 +77,10 @@ class StopModel(nav: AppNav, val place: Place) : ScreenModel(nav) {
     var error by mutableStateOf<String?>(null)
 
     suspend fun refresh() {
-        val id = place.stopId ?: run { error = "Unknown stop"; loading = false; return }
+        val id = place.stopId ?: run { error = S.unknownStop; loading = false; return }
         runCatching { repo.stopBoard(id) }
             .onSuccess { entries = it; error = null }
-            .onFailure { if (entries.isEmpty()) error = "Couldn't load departures" }
+            .onFailure { if (entries.isEmpty()) error = S.errLoadDepartures }
         loading = false
     }
 
@@ -119,13 +120,13 @@ fun StopScreen(model: StopModel) {
         Column(Modifier.fillMaxSize()) {
             Surface(color = MaterialTheme.colorScheme.surface) {
                 Row(Modifier.statusBarsPadding().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+                    IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, S.back) }
                     Column(Modifier.weight(1f)) {
                         Text(model.place.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         model.place.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = LocalExtra.current.subtle) }
                     }
                     IconButton(onClick = model::toggleFavorite) {
-                        Icon(if (fav) Icons.Rounded.Star else Icons.Rounded.StarBorder, "Favorite stop",
+                        Icon(if (fav) Icons.Rounded.Star else Icons.Rounded.StarBorder, S.favoriteStop,
                             tint = if (fav) Color(0xFFF5A524) else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -141,10 +142,10 @@ fun StopScreen(model: StopModel) {
             )
             if (model.loading) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp)) else Spacer(Modifier.height(2.dp))
             when {
-                model.loading && model.entries.isEmpty() -> LoadingBox(text = "Loading departures…")
-                model.error != null -> MessageBox("No departures", body = model.error, action = "Retry",
+                model.loading && model.entries.isEmpty() -> LoadingBox(text = S.loadingDepartures)
+                model.error != null -> MessageBox(S.noDepartures, body = model.error, action = S.retry,
                     onAction = { model.scope.launch { model.refresh() } })
-                groups.isEmpty() -> MessageBox("No upcoming departures", body = "Nothing scheduled from this stop in the next hours.")
+                groups.isEmpty() -> MessageBox(S.noUpcomingDepartures, body = S.noUpcomingDeparturesHint)
                 else -> LazyColumn(Modifier.fillMaxSize().testTag("stop_board"), contentPadding = PaddingValues(bottom = 96.dp)) {
                     items(groups, key = { it.key }) { g ->
                         BoardRow(g, now, onTimeClick = { model.open(g.first, focusVehicle = true) }) { model.open(g.first) }
@@ -157,7 +158,7 @@ fun StopScreen(model: StopModel) {
         ExtendedFloatingActionButton(
             onClick = model::directions,
             icon = { Icon(Icons.Rounded.Directions, null) },
-            text = { Text("Directions") },
+            text = { Text(S.directions) },
             shape = CircleShape,
             modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(16.dp),
         )
@@ -178,7 +179,7 @@ private fun BoardRow(g: BoardGroup, now: Instant, onTimeClick: () -> Unit, onCli
             Text(d.headsign, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             val later = g.entries.drop(1).take(2).joinToString("  ") { Fmt.time(it.live?.best ?: it.departure.scheduled) }
-            Text(listOfNotNull(d.stop.platformLabel, d.agency, later.takeIf { it.isNotBlank() }?.let { "then $it" }).joinToString(" · "),
+            Text(listOfNotNull(d.stop.platformLabel, d.agency, later.takeIf { it.isNotBlank() }?.let { S.thenTime(it) }).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1)
         }
         Spacer(Modifier.width(8.dp))
@@ -194,11 +195,11 @@ private fun BoardRow(g: BoardGroup, now: Instant, onTimeClick: () -> Unit, onCli
             )
             val sub = when (live?.status) {
                 LiveStatus.LIVE -> when {
-                    freshness == Freshness.STALE -> live.recordedAt?.let { Fmt.ago(it, now).lowercase() } ?: "live"
-                    else -> "live"
+                    freshness == Freshness.STALE -> live.recordedAt?.let { Fmt.ago(it, now).lowercase() } ?: S.liveLower
+                    else -> S.liveLower
                 }
-                LiveStatus.UNTRACKED -> "no live data"
-                else -> if (t.epochSecond - now.epochSecond < 3600) Fmt.time(t) else "scheduled"
+                LiveStatus.UNTRACKED -> S.noLiveData
+                else -> if (t.epochSecond - now.epochSecond < 3600) Fmt.time(t) else S.scheduledLower
             }
             Text(sub, style = MaterialTheme.typography.labelSmall, color = x.subtle)
         }

@@ -47,6 +47,7 @@ import com.maslul.app.ui.theme.LocalExtra
 import com.maslul.app.ui.theme.Numeric
 import kotlinx.coroutines.delay
 import java.time.Instant
+import com.maslul.app.i18n.S
 
 /** Arrival-time colour by data quality: green live, amber stale, plain timetable. */
 @Composable
@@ -83,7 +84,7 @@ fun LiveSignal(freshness: Freshness, modifier: Modifier = Modifier, size: Dp = 1
     } else {
         null
     }
-    Canvas(modifier.size(size).semantics { contentDescription = if (phase != null) "Live" else "Live data delayed" }) {
+    Canvas(modifier.size(size).semantics { contentDescription = if (phase != null) S.live else S.liveDelayed }) {
         val w = this.size.minDimension
         val stroke = w * 0.15f
         val c = Offset(w * 0.2f, w * 0.8f)
@@ -125,7 +126,7 @@ fun ArrivalTime(
     Row(
         modifier
             .clip(RoundedCornerShape(8.dp))
-            .then(if (onClick != null) Modifier.clickable(onClickLabel = "Show on map", onClick = onClick) else Modifier)
+            .then(if (onClick != null) Modifier.clickable(onClickLabel = S.showOnMap, onClick = onClick) else Modifier)
             .padding(horizontal = if (onClick != null) 4.dp else 0.dp, vertical = 1.dp),
         verticalAlignment = Alignment.Top,
     ) {
@@ -164,7 +165,7 @@ fun LiveLocationCard(
             Column(Modifier.weight(1f, fill = false)) {
                 Text(title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    Fmt.ago(recordedAt, now) + if (f == Freshness.LIVE) " · refreshes automatically" else " · not reporting, may be delayed",
+                    Fmt.ago(recordedAt, now) + " · " + if (f == Freshness.LIVE) S.refreshesAutomatically else S.notReporting,
                     style = MaterialTheme.typography.labelSmall.merge(Numeric),
                     color = if (f == Freshness.LIVE) x.subtle else x.stale,
                     maxLines = 1,
@@ -173,7 +174,7 @@ fun LiveLocationCard(
             }
             if (onClose != null) {
                 IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Rounded.Close, "Stop following", tint = x.subtle, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Rounded.Close, S.stopFollowing, tint = x.subtle, modifier = Modifier.size(18.dp))
                 }
             }
         }

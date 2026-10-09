@@ -1,31 +1,35 @@
 package com.maslul.app
 
-import com.maslul.app.data.Leg
-import com.maslul.app.data.StopCall
+import com.maslul.app.data.AppLanguage
 import com.maslul.app.data.TransitMode
+import com.maslul.app.i18n.L10n
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import java.time.Instant
 
 class TransitModeTest {
-    private fun ride(mode: TransitMode): Leg {
-        val s = StopCall("s", "S", null, 32.0, 34.8, null, null)
-        return Leg(mode, s, s, Instant.EPOCH, Instant.EPOCH, null, null, "1", null, null, null, null, null, null, emptyList(), emptyList())
-    }
+    private val en = L10n.of(AppLanguage.EN)
+    private val he = L10n.of(AppLanguage.HE)
+    private val ru = L10n.of(AppLanguage.RU)
 
     @Test
     fun hurryLabelNamesTheVehicle() {
         // "Hurry · train is close", not "bus is close", when the ride is a train or the light rail.
-        assertEquals("bus", TransitMode.BUS.vehicle)
-        assertEquals("train", TransitMode.TRAIN.vehicle)
-        assertEquals("train", TransitMode.LIGHT_RAIL.vehicle)
-        assertEquals("ferries", TransitMode.FERRY.vehicles)
+        assertEquals("bus is close", en.vehicleClose(TransitMode.BUS))
+        assertEquals("train is close", en.vehicleClose(TransitMode.TRAIN))
+        assertEquals("train is close", en.vehicleClose(TransitMode.LIGHT_RAIL))
+        // A bus is masculine in Hebrew, a train feminine.
+        assertEquals("האוטובוס קרוב", he.vehicleClose(TransitMode.BUS))
+        assertEquals("הרכבת קרובה", he.vehicleClose(TransitMode.TRAIN))
+        assertEquals("трамвай близко", ru.vehicleClose(TransitMode.LIGHT_RAIL))
     }
 
     @Test
     fun ridesOfOneModeUseItsWord() {
-        assertEquals("trains", TransitMode.vehiclesOf(listOf(ride(TransitMode.LIGHT_RAIL), ride(TransitMode.LIGHT_RAIL))))
-        assertEquals("buses", TransitMode.vehiclesOf(listOf(ride(TransitMode.BUS))))
-        assertEquals("rides", TransitMode.vehiclesOf(listOf(ride(TransitMode.BUS), ride(TransitMode.TRAIN))))
+        assertEquals("Next trains from A", en.nextFrom(TransitMode.LIGHT_RAIL, "A"))
+        assertEquals("Next buses from A", en.nextFrom(TransitMode.BUS, "A"))
+        assertEquals("Next ferries from A", en.nextFrom(TransitMode.FERRY, "A"))
+        // A mix of modes.
+        assertEquals("Next rides from A", en.nextFrom(null, "A"))
+        assertEquals("האוטובוסים הבאים מ־A", he.nextFrom(TransitMode.BUS, "A"))
     }
 }

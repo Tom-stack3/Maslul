@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
+import com.maslul.app.i18n.S
 
 /**
  * A shuttle with a fixed timetable that the open data doesn't know about, e.g. a company bus
@@ -30,7 +31,6 @@ data class Shuttle(
 object ShuttleSchedule {
     /** Colour of shuttle rides, so they stand apart from the operators' lines. */
     const val COLOR = 0xFF7C3AED.toInt()
-    const val AGENCY = "My shuttle"
     /** Walking this far or less to or from a shuttle stop needs no planning. */
     private const val SAME_PLACE_M = 80.0
 
@@ -53,21 +53,17 @@ object ShuttleSchedule {
 
     /** What a shuttle still needs before it can be saved, as short phrases in form order; empty when it's complete. */
     fun missing(name: String, from: Place?, to: Place?, times: String, rideMinutes: Int?, days: Set<Int>): List<String> = buildList {
-        if (name.isBlank()) add("a name")
-        if (from == null) add("where it leaves from")
-        if (to == null) add("where it goes")
-        if (from != null && to != null && isNear(from.point, to.point)) add("two different stops")
-        if (parseTimes(times) == null) add(if (isEmptyTimes(times)) "departure times" else "departure times like 07:30")
-        if (rideMinutes == null) add("how long the ride takes")
-        if (days.isEmpty()) add("a day it runs")
+        if (name.isBlank()) add(S.needName)
+        if (from == null) add(S.needFrom)
+        if (to == null) add(S.needTo)
+        if (from != null && to != null && isNear(from.point, to.point)) add(S.needTwoStops)
+        if (parseTimes(times) == null) add(if (isEmptyTimes(times)) S.needTimes else S.needTimesLike)
+        if (rideMinutes == null) add(S.needRideTime)
+        if (days.isEmpty()) add(S.needDay)
     }
 
     /** "Still needed: a name and how long the ride takes." */
-    fun missingText(missing: List<String>): String? = when (missing.size) {
-        0 -> null
-        1 -> "Still needed: ${missing[0]}."
-        else -> "Still needed: ${missing.dropLast(1).joinToString(", ")} and ${missing.last()}."
-    }
+    fun missingText(missing: List<String>): String? = if (missing.isEmpty()) null else S.stillNeeded(missing)
 
     fun formatTime(minutes: Int) ="%02d:%02d".format(minutes / 60, minutes % 60)
 
@@ -75,11 +71,10 @@ object ShuttleSchedule {
 
     /** "Sun–Thu", "Every day", "Fri, Sat". */
     fun formatDays(days: Set<Int>): String {
-        if (days.size == 7) return "Every day"
-        if (days == Shuttle.WORK_WEEK) return "Sun–Thu"
+        if (days.size == 7) return S.everyDay
+        if (days == Shuttle.WORK_WEEK) return S.sunToThu
         // Week order as in Israel: Sunday first.
-        return listOf(7, 1, 2, 3, 4, 5, 6).filter { it in days }
-            .joinToString(", ") { DayOfWeek.of(it).name.take(3).lowercase().replaceFirstChar(Char::uppercase) }
+        return listOf(7, 1, 2, 3, 4, 5, 6).filter { it in days }.joinToString(", ") { S.dayShort(DayOfWeek.of(it)) }
     }
 
     /** Departures of [s] from [from] (inclusive) up to [until], soonest first. */
@@ -114,7 +109,7 @@ object ShuttleSchedule {
             routeLongName = null,
             routeColor = COLOR,
             routeTextColor = null,
-            agencyName = AGENCY,
+            agencyName = S.myShuttle,
             tripId = null,
             routeId = null,
             intermediateStops = emptyList(),

@@ -62,6 +62,7 @@ import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
+import com.maslul.app.i18n.S
 
 data class MapLine(val points: List<GeoPoint>, val color: Color, val width: Float = 5f, val dashed: Boolean = false)
 
@@ -333,7 +334,7 @@ private fun Compass(bearing: Float, modifier: Modifier, onClick: () -> Unit) {
         shape = CircleShape,
         shadowElevation = 4.dp,
         color = MaterialTheme.colorScheme.surface,
-        modifier = modifier.size(40.dp).semantics { contentDescription = "Reset map to north" },
+        modifier = modifier.size(40.dp).semantics { contentDescription = S.resetNorth },
     ) {
         ComposeCanvas(Modifier.size(40.dp).rotate(-bearing)) {
             val w = size.width * 0.13f

@@ -63,6 +63,7 @@ import com.maslul.app.data.Place
 import com.maslul.app.data.UserStore
 import com.maslul.app.data.favoriteFor
 import com.maslul.app.ui.theme.LocalExtra
+import com.maslul.app.i18n.S
 
 val FavoriteGold = Color(0xFFF5A524)
 
@@ -119,7 +120,7 @@ private fun FavoriteDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (draft.existing == null) "Save favorite" else "Edit favorite") },
+        title = { Text(if (draft.existing == null) S.saveFavorite else S.editFavorite) },
         text = {
             Column {
                 Text(
@@ -133,8 +134,8 @@ private fun FavoriteDialog(
                 OutlinedTextField(
                     value = label,
                     onValueChange = { label = it },
-                    label = { Text("Label") },
-                    placeholder = { Text("e.g. Gym, Mom") },
+                    label = { Text(S.label) },
+                    placeholder = { Text(S.labelExample) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { onSave(label.text, icon) }),
@@ -147,14 +148,14 @@ private fun FavoriteDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(label.text, icon) }, modifier = Modifier.testTag("favorite_save")) { Text("Save") }
+            TextButton(onClick = { onSave(label.text, icon) }, modifier = Modifier.testTag("favorite_save")) { Text(S.save) }
         },
         dismissButton = {
             Row {
                 if (onDelete != null) {
-                    TextButton(onClick = onDelete) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = onDelete) { Text(S.remove, color = MaterialTheme.colorScheme.error) }
                 }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(onClick = onDismiss) { Text(S.cancel) }
             }
         },
     )

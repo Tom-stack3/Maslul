@@ -9,6 +9,7 @@ import com.maslul.app.data.TransitMode
 import com.maslul.app.ui.components.Fmt
 import com.maslul.app.ui.components.modeName
 import java.time.Instant
+import com.maslul.app.i18n.S
 
 enum class GuideAlert { BOARD_SOON, GET_OFF_NEXT, GET_OFF_NOW, ARRIVED }
 
@@ -72,26 +73,26 @@ class TripGuide(private val itinerary: Itinerary, private val destination: Strin
         val dest = itinerary.legs.last().to.point
         val arrived = pos != null && (GeoMath.distance(pos, dest) < 60 || lastAlong >= totalM - 40)
         if (arrived) {
-            return GuideState(legIndex, "You've arrived", destination, GuideAlert.ARRIVED, "arrived", 1f, true)
+            return GuideState(legIndex, S.youveArrived, destination, GuideAlert.ARRIVED, "arrived", 1f, true)
         }
 
         if (!leg.mode.isTransit) {
-            val verb = if (leg.mode == TransitMode.CAR) "Ride to" else "Walk to"
             val nextIdx = (legIndex + 1 until itinerary.legs.size).firstOrNull { itinerary.legs[it].mode.isTransit }
             if (nextIdx == null) {
                 val remaining = (totalM - lastAlong).coerceAtLeast(0.0)
-                return GuideState(legIndex, "$verb $destination", "${Fmt.distance(remaining)} to go", null, null, progress, false)
+                val title = if (leg.mode == TransitMode.CAR) S.rideTo(destination) else S.walkTo(destination)
+                return GuideState(legIndex, title, S.toGo(Fmt.distance(remaining)), null, null, progress, false)
             }
             val next = itinerary.legs[nextIdx]
             val call = live[nextIdx]
             val eta = if (call?.status == LiveStatus.LIVE) call.expected else next.start
             val mins = eta?.let { (it.epochSecond - now.epochSecond + 30) / 60 }
-            val liveTag = if (call?.status == LiveStatus.LIVE) " (live)" else ""
+            val liveTag = if (call?.status == LiveStatus.LIVE) " (${S.liveLower})" else ""
             val text = "${modeName(next.mode)} ${next.lineLabel} " +
-                (mins?.let { if (it <= 0) "is arriving$liveTag" else "in $it min$liveTag" } ?: "at ${Fmt.time(next.start)}")
+                (mins?.let { if (it <= 0) S.isArriving + liveTag else S.inTime(S.min(it)) + liveTag } ?: S.atTime(Fmt.time(next.start)))
             val soon = mins != null && mins in 0..3
             return GuideState(
-                legIndex, if (leg.mode == TransitMode.CAR) "Get dropped off near ${next.from.name}" else "Walk to ${next.from.name}", text,
+                legIndex, if (leg.mode == TransitMode.CAR) S.droppedOff(next.from.name) else S.walkTo(next.from.name), text,
                 if (soon) GuideAlert.BOARD_SOON else null, if (soon) "board-$nextIdx" else null, progress, false,
             )
         }
@@ -104,14 +105,14 @@ class TripGuide(private val itinerary: Itinerary, private val destination: Strin
             all.drop(1).count { (it.scheduledTime ?: leg.end).isAfter(now) }
         }
         val arriveAt = live[legIndex]?.alightExpected ?: leg.end
-        val title = "${modeName(leg.mode)} ${leg.lineLabel} → ${leg.to.name}"
+        val title = "${modeName(leg.mode)} ${leg.lineLabel} ${S.arrow} ${leg.to.name}"
         return when {
-            remaining <= 0 -> GuideState(legIndex, "Get off now", leg.to.name, GuideAlert.GET_OFF_NOW, "off-$legIndex", progress, false)
+            remaining <= 0 -> GuideState(legIndex, S.getOffNow, leg.to.name, GuideAlert.GET_OFF_NOW, "off-$legIndex", progress, false)
             remaining == 1 -> GuideState(
-                legIndex, "Get off at the next stop", leg.to.name, GuideAlert.GET_OFF_NEXT, "next-$legIndex", progress, false,
+                legIndex, S.getOffNextStop, leg.to.name, GuideAlert.GET_OFF_NEXT, "next-$legIndex", progress, false,
             )
             else -> GuideState(
-                legIndex, title, "$remaining stops · get off ${Fmt.time(arriveAt)}", null, null, progress, false,
+                legIndex, title, S.stopsGetOff(remaining, Fmt.time(arriveAt)), null, null, progress, false,
             )
         }
     }

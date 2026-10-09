@@ -73,6 +73,7 @@ import java.time.Instant
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.maslul.app.i18n.S
 
 class LinesHomeModel(nav: AppNav) : ScreenModel(nav) {
     var query by mutableStateOf("")
@@ -106,7 +107,7 @@ class LinesHomeModel(nav: AppNav) : ScreenModel(nav) {
             error = null
             runCatching { repo.searchLines(query, mode) }
                 .onSuccess { results = it }
-                .onFailure { error = "Couldn't load lines. Check your connection."; results = emptyList() }
+                .onFailure { error = S.errLoadLines; results = emptyList() }
             loading = false
         }
     }
@@ -145,8 +146,8 @@ fun LinesHomeScreen(model: LinesHomeModel) {
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(Modifier.background(MaterialTheme.colorScheme.surface).statusBarsPadding()) {
-            Text("Lines", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 10.dp))
-            SearchBox(model.query, model::onQuery, "Line number or name, e.g. 480", Modifier.testTag("line_search"))
+            Text(S.tabLines, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 10.dp))
+            SearchBox(model.query, model::onQuery, S.lineSearchHint, Modifier.testTag("line_search"))
             Row(
                 Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -165,29 +166,29 @@ fun LinesHomeScreen(model: LinesHomeModel) {
 
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
             if (model.showsResults) {
-                if (model.error != null) item { MessageBox("Something went wrong", body = model.error) }
+                if (model.error != null) item { MessageBox(S.somethingWrong, body = model.error) }
                 else if (!model.loading && model.results.isEmpty()) {
-                    item { MessageBox("No lines found", body = "Search by line number (e.g. 1, 480, 5א) or by a city or station name.") }
+                    item { MessageBox(S.noLinesFound, body = S.noLinesFoundHint) }
                 }
                 items(model.results, key = { "${it.main.operatorRef}-${it.main.mkt}-${it.main.gtfsRouteId}" }) { line ->
                     LineRow(line.main, variants = line.routes.size) { model.open(line.main) }
                 }
             } else {
                 if (data.favoriteLines.isNotEmpty()) {
-                    item { SectionHeader("Favorite lines") }
+                    item { SectionHeader(S.favoriteLines) }
                     items(data.favoriteLines, key = { "fav-${it.operatorRef}-${it.mkt}" }) { r -> LineRow(r, favorite = true) { model.open(r) } }
                 }
                 val lines = model.nearbyLines.filter { model.mode == null || it.departure.mode == model.mode }
-                item { SectionHeader("Nearby lines", action = "Refresh", onAction = model::loadNearby) }
+                item { SectionHeader(S.nearbyLines, action = S.refresh, onAction = model::loadNearby) }
                 if (lines.isEmpty()) {
                     item {
                         if (model.nearbyLoading || model.linesLoading) LoadingBox()
-                        else MessageBox("No lines nearby", body = "Allow location access to see lines around you.", icon = Icons.Rounded.NearMe)
+                        else MessageBox(S.noLinesNearby, body = S.noLinesNearbyHint, icon = Icons.Rounded.NearMe)
                     }
                 }
                 items(lines.take(10), key = { "nl-${it.departure.routeId}-${it.departure.headsign}" }) { l ->
                     NearbyLineRow(l, now) {
-                        model.openLine(l) { Toast.makeText(ctx, "Line details unavailable", Toast.LENGTH_SHORT).show() }
+                        model.openLine(l) { Toast.makeText(ctx, S.lineDetailsUnavailable, Toast.LENGTH_SHORT).show() }
                     }
                 }
             }
@@ -221,7 +222,7 @@ fun SearchBox(query: String, onQuery: (String) -> Unit, placeholder: String, fie
         }
         if (query.isNotEmpty()) {
             IconButton(onClick = { onQuery("") }, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Rounded.Close, "Clear", Modifier.size(18.dp))
+                Icon(Icons.Rounded.Close, S.clear, Modifier.size(18.dp))
             }
         }
     }
@@ -238,7 +239,7 @@ private fun NearbyLineRow(l: NearbyLine, now: Instant, onClick: () -> Unit) {
         Box(Modifier.widthIn(min = 64.dp)) { LineBadge(d.lineLabel, d.mode, color = lineColor(d)) }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text("to ${d.headsign}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface,
+            Text(S.toHeadsign(d.headsign), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("${Fmt.distance(l.distanceM)} · ${l.stop.name}", style = MaterialTheme.typography.bodySmall, color = x.subtle,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -248,7 +249,7 @@ private fun NearbyLineRow(l: NearbyLine, now: Instant, onClick: () -> Unit) {
             Text(Fmt.relative(l.next.first(), now), style = MaterialTheme.typography.titleSmall.merge(Numeric),
                 color = MaterialTheme.colorScheme.onSurface)
             l.next.getOrNull(1)?.let {
-                Text("then ${Fmt.time(it)}", style = MaterialTheme.typography.labelSmall.merge(Numeric), color = x.subtle)
+                Text(S.thenTime(Fmt.time(it)), style = MaterialTheme.typography.labelSmall.merge(Numeric), color = x.subtle)
             }
         }
     }
@@ -275,7 +276,7 @@ fun LineRow(r: LineRoute, variants: Int = 1, favorite: Boolean = false, onClick:
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(r.agency, style = MaterialTheme.typography.labelMedium, color = LocalExtra.current.subtle)
                 if (variants > 2) {
-                    Text("  ·  $variants variants", style = MaterialTheme.typography.labelMedium, color = LocalExtra.current.subtle)
+                    Text("  ·  " + S.nVariants(variants), style = MaterialTheme.typography.labelMedium, color = LocalExtra.current.subtle)
                 }
             }
         }

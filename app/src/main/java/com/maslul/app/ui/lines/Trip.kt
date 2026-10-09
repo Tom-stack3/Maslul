@@ -68,6 +68,7 @@ import com.maslul.app.ui.theme.LocalExtra
 import com.maslul.app.ui.theme.Numeric
 import kotlinx.coroutines.delay
 import java.time.Instant
+import com.maslul.app.i18n.S
 
 /** Map id of the trip's live vehicle. */
 private const val VEHICLE_ID = "veh"
@@ -111,12 +112,12 @@ fun TripScreen(model: TripModel) {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Surface(color = MaterialTheme.colorScheme.surface) {
             Row(Modifier.statusBarsPadding().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+                IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, S.back) }
                 if (trip != null) {
                     LineBadge(trip.lineLabel, trip.mode, color = lineColor(trip), large = true)
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(trip.headsign?.let { "to $it" } ?: "", style = MaterialTheme.typography.titleSmall, maxLines = 1,
+                        Text(trip.headsign?.let { S.toHeadsign(it) } ?: "", style = MaterialTheme.typography.titleSmall, maxLines = 1,
                             overflow = TextOverflow.Ellipsis)
                         trip.agencyName?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = LocalExtra.current.subtle) }
                     }
@@ -124,8 +125,8 @@ fun TripScreen(model: TripModel) {
             }
         }
         when {
-            trip == null && model.loading -> LoadingBox(text = "Loading trip…")
-            trip == null -> MessageBox("Trip unavailable", body = "This trip isn't in the current timetable.")
+            trip == null && model.loading -> LoadingBox(text = S.loadingTrip)
+            trip == null -> MessageBox(S.tripUnavailable, body = S.tripUnavailableHint)
             else -> TripBody(model, trip, now)
         }
     }
@@ -162,7 +163,7 @@ private fun TripBody(model: TripModel, trip: Leg, now: Instant) {
         )
         if (following) {
             LiveLocationCard(
-                "${trip.lineLabel} live location",
+                S.liveLocationOf(trip.lineLabel),
                 p!!.vehicle.recordedAt,
                 Modifier.padding(8.dp).align(Alignment.TopCenter),
                 onClose = { model.following = false },
@@ -171,7 +172,7 @@ private fun TripBody(model: TripModel, trip: Leg, now: Instant) {
     }
     Row(
         Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
-            .clickable(enabled = p != null, onClickLabel = "Show on map") { model.following = true }
+            .clickable(enabled = p != null, onClickLabel = S.showOnMap) { model.following = true }
             .padding(horizontal = 20.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -181,22 +182,22 @@ private fun TripBody(model: TripModel, trip: Leg, now: Instant) {
             LiveSignal(f, size = 14.dp)
             Spacer(Modifier.width(8.dp))
             Text(
-                (if (f == Freshness.LIVE) "Live · " else "Not updating · ") + Fmt.ago(p.vehicle.recordedAt, tick).replaceFirstChar { it.lowercase() },
+                (if (f == Freshness.LIVE) S.live else S.notUpdating) + " · " + Fmt.ago(p.vehicle.recordedAt, tick).replaceFirstChar { it.lowercase() },
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (f == Freshness.LIVE) MaterialTheme.colorScheme.onSurface else x.stale,
                 modifier = Modifier.weight(1f),
             )
             if (!model.following) {
-                Icon(Icons.Rounded.MyLocation, "Show on map", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                Icon(Icons.Rounded.MyLocation, S.showOnMap, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(10.dp))
             }
         } else {
             val start = trip.from.scheduledTime
             Text(
                 when {
-                    start != null && start.isAfter(now) -> "Departs ${Fmt.time(start)} · not started yet"
-                    trip.end.isBefore(now) -> "This trip has ended"
-                    else -> "No live position for this trip — showing the timetable"
+                    start != null && start.isAfter(now) -> S.departsNotStarted(Fmt.time(start))
+                    trip.end.isBefore(now) -> S.tripEnded
+                    else -> S.noLivePosition
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = x.subtle,
@@ -239,7 +240,7 @@ private fun TripBody(model: TripModel, trip: Leg, now: Instant) {
                     )
                     Text(
                         listOfNotNull(
-                            when (i) { board -> "Board here"; alight -> "Get off here"; else -> null },
+                            when (i) { board -> S.boardHere; alight -> S.getOffHere; else -> null },
                             c.code?.let { "#$it" },
                             c.platformLabel,
                         ).joinToString(" · "),
@@ -250,7 +251,7 @@ private fun TripBody(model: TripModel, trip: Leg, now: Instant) {
                 }
                 if (p != null && i == p.lastPassed && i < calls.lastIndex) {
                     TimelineRow(rail, rail, Node.VEHICLE, color, nodeY = 16.dp) {
-                        Text("${trip.lineLabel} is here", style = MaterialTheme.typography.labelMedium, color = readableAccent(color),
+                        Text(S.lineIsHere(trip.lineLabel), style = MaterialTheme.typography.labelMedium, color = readableAccent(color),
                             modifier = Modifier.padding(vertical = 6.dp))
                     }
                 }

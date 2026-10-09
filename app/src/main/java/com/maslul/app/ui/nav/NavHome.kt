@@ -103,8 +103,11 @@ import com.maslul.app.ui.theme.LocalExtra
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.maslul.app.i18n.S
+import com.maslul.app.i18n.shownName
 
-val CurrentLocation = Place("Current location", 0.0, 0.0, kind = PlaceKind.CURRENT_LOCATION)
+/** Where the user is when the trip is planned, named in the current language. */
+val CurrentLocation get() = Place(S.currentLocation, 0.0, 0.0, kind = PlaceKind.CURRENT_LOCATION)
 
 class NavHomeModel(nav: AppNav) : ScreenModel(nav) {
     var stops by mutableStateOf<List<Place>>(emptyList())
@@ -140,7 +143,7 @@ class NavHomeModel(nav: AppNav) : ScreenModel(nav) {
     fun pickHomeOrWork(isHome: Boolean) {
         nav.push(
             SearchModel(nav, from = null, to = null, editing = SearchField.TO, single = true,
-                title = if (isHome) "Set home" else "Set work") { p, _ ->
+                title = if (isHome) S.setHome else S.setWork) { p, _ ->
                 if (isHome) store.setHome(p) else store.setWork(p)
                 nav.pop()
             },
@@ -163,7 +166,7 @@ class NavHomeModel(nav: AppNav) : ScreenModel(nav) {
 
     fun addFavorite() {
         nav.push(
-            SearchModel(nav, from = null, to = null, editing = SearchField.TO, single = true, title = "Add favorite") { p, _ ->
+            SearchModel(nav, from = null, to = null, editing = SearchField.TO, single = true, title = S.addFavorite) { p, _ ->
                 nav.pop()
                 editFavorite(p)
             },
@@ -234,7 +237,7 @@ fun NavHomeScreen(model: NavHomeModel) {
                     initialZoom = 15.0,
                     controller = controller,
                     onMarkerClick = { id -> model.stops.firstOrNull { it.stopId == id }?.let(model::openStop) },
-                    onLongPress = { p -> model.planTo(Place("Dropped pin", p.lat, p.lon, kind = PlaceKind.PIN)) },
+                    onLongPress = { p -> model.planTo(Place(S.droppedPin, p.lat, p.lon, kind = PlaceKind.PIN)) },
                     onCameraIdle = model::onCameraIdle,
                     compassModifier = Modifier.statusBarsPadding().padding(top = 84.dp, end = 16.dp),
                 )
@@ -252,13 +255,13 @@ fun NavHomeScreen(model: NavHomeModel) {
                             Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(12.dp))
                             Text(
-                                "Where to?",
+                                S.whereTo,
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.weight(1f),
                             )
                             IconButton(onClick = { model.nav.push(SettingsModel(model.nav)) }) {
-                                Icon(Icons.Rounded.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Icon(Icons.Rounded.Settings, S.settings, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -286,7 +289,7 @@ fun NavHomeScreen(model: NavHomeModel) {
                                 Row(Modifier.padding(start = 12.dp, end = 14.dp).height(40.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Rounded.DirectionsBus, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("On a bus?", style = MaterialTheme.typography.labelLarge)
+                                    Text(S.onABus, style = MaterialTheme.typography.labelLarge)
                                 }
                             }
                         }
@@ -298,7 +301,7 @@ fun NavHomeScreen(model: NavHomeModel) {
                             modifier = Modifier.testTag("home_map_expand"),
                         ) {
                             Icon(if (mapOnly) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen,
-                                if (mapOnly) "Show places" else "Expand map")
+                                if (mapOnly) S.showPlaces else S.expandMap)
                         }
                         Spacer(Modifier.width(8.dp))
                         SmallFloatingActionButton(
@@ -310,14 +313,14 @@ fun NavHomeScreen(model: NavHomeModel) {
                             },
                             containerColor = MaterialTheme.colorScheme.surface,
                             contentColor = MaterialTheme.colorScheme.primary,
-                        ) { Icon(Icons.Rounded.MyLocation, "My location") }
+                        ) { Icon(Icons.Rounded.MyLocation, S.myLocation) }
                     }
                 }
                 if (mapOnly) {
                     ExtendedFloatingActionButton(
                         onClick = { scope.launch { sheet.partialExpand() } },
                         icon = { Icon(Icons.Rounded.ExpandLess, null) },
-                        text = { Text("Places") },
+                        text = { Text(S.places) },
                         containerColor = MaterialTheme.colorScheme.surface,
                         modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 76.dp)
                             .testTag("home_show_places"),
@@ -336,11 +339,11 @@ private fun HomePlaces(model: NavHomeModel, data: UserData) {
         Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        QuickPlace("Home", data.home?.name ?: "Set location", Icons.Rounded.Home,
+        QuickPlace(S.home, data.home?.name ?: S.setLocation, Icons.Rounded.Home,
             modifier = Modifier.weight(1f),
             onClick = { data.home?.let(model::planTo) ?: model.pickHomeOrWork(true) },
             onEdit = { model.pickHomeOrWork(true) })
-        QuickPlace("Work", data.work?.name ?: "Set location", Icons.Rounded.Work,
+        QuickPlace(S.work, data.work?.name ?: S.setLocation, Icons.Rounded.Work,
             modifier = Modifier.weight(1f),
             onClick = { data.work?.let(model::planTo) ?: model.pickHomeOrWork(false) },
             onEdit = { model.pickHomeOrWork(false) })
@@ -355,16 +358,16 @@ private fun HomePlaces(model: NavHomeModel, data: UserData) {
                 onClick = { model.planTo(f.place) },
                 onLongClick = { model.editFavorite(f.place) })
         }
-        AddFavoriteChip(if (data.favoritePlaces.isEmpty()) "Add favorite place" else "Add", model::addFavorite)
+        AddFavoriteChip(if (data.favoritePlaces.isEmpty()) S.addFavoritePlace else S.add, model::addFavorite)
     }
     if (data.savedTrips.isNotEmpty()) {
-        SectionHeader("Saved trips")
+        SectionHeader(S.savedTrips)
         data.savedTrips.forEach { t -> SavedTripRow(t) { model.planTo(t.to, t.from) } }
     }
-    SectionHeader("Recent")
+    SectionHeader(S.recent)
     if (data.recents.isEmpty()) {
         Text(
-            "Search for a place, or long-press the map to get directions there.",
+            S.homeHint,
             style = MaterialTheme.typography.bodyMedium,
             color = LocalExtra.current.subtle,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
@@ -377,7 +380,7 @@ private fun HomePlaces(model: NavHomeModel, data: UserData) {
             icon = Icons.Rounded.History,
             trailing = {
                 IconButton(onClick = { model.store.removeRecent(p) }, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Rounded.Close, "Remove", tint = LocalExtra.current.subtle, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Rounded.Close, S.remove, tint = LocalExtra.current.subtle, modifier = Modifier.size(18.dp))
                 }
             },
             onLongClick = { model.editFavorite(p) },
@@ -413,7 +416,7 @@ private fun QuickPlace(
             }
             if (onEdit != null) {
                 IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Rounded.Edit, "Edit $title", tint = LocalExtra.current.subtle, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Rounded.Edit, S.editNamed(title), tint = LocalExtra.current.subtle, modifier = Modifier.size(16.dp))
                 }
             }
         }
@@ -426,7 +429,7 @@ private fun FavoriteChip(label: String, icon: ImageVector, onClick: () -> Unit, 
     Row(
         Modifier.height(40.dp).widthIn(max = 180.dp).clip(RoundedCornerShape(20.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .combinedClickable(onLongClick = onLongClick, onLongClickLabel = "Edit favorite", onClick = onClick)
+            .combinedClickable(onLongClick = onLongClick, onLongClickLabel = S.editFavorite, onClick = onClick)
             .padding(start = 12.dp, end = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -454,7 +457,7 @@ private fun AddFavoriteChip(text: String, onClick: () -> Unit) {
 private fun SavedTripRow(t: SavedTrip, onClick: () -> Unit) {
     PlaceRow(
         title = t.label ?: t.to.name,
-        subtitle = "From ${t.from.name}",
+        subtitle = S.fromPlace(t.from.shownName),
         icon = Icons.Rounded.SwapCalls,
         iconTint = MaterialTheme.colorScheme.primary,
         onClick = onClick,

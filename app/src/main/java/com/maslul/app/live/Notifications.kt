@@ -13,6 +13,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.maslul.app.MainActivity
 import com.maslul.app.R
 import java.time.Instant
+import com.maslul.app.i18n.S
 
 object Notifs {
     const val CH_TRIP = "live_trip"
@@ -22,21 +23,21 @@ object Notifs {
     fun ensureChannels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
-            NotificationChannel(CH_TRIP, "Live directions", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Ongoing step-by-step trip guidance"
+            NotificationChannel(CH_TRIP, S.liveDirections, NotificationManager.IMPORTANCE_LOW).apply {
+                description = S.chTripDescription
                 setShowBadge(false)
             },
         )
         nm.createNotificationChannel(
-            NotificationChannel(CH_ALERT, "Get-off & boarding alerts", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "Alerts when your ride is arriving or it's time to get off"
+            NotificationChannel(CH_ALERT, S.chAlerts, NotificationManager.IMPORTANCE_HIGH).apply {
+                description = S.chAlertsDescription
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 350, 150, 350)
             },
         )
         nm.createNotificationChannel(
-            NotificationChannel(CH_REMIND, "Departure reminders", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "Reminders to leave on time"
+            NotificationChannel(CH_REMIND, S.departureReminders, NotificationManager.IMPORTANCE_HIGH).apply {
+                description = S.chRemindersDescription
             },
         )
     }

@@ -45,6 +45,7 @@ import com.maslul.app.ui.theme.LocalExtra
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.maslul.app.i18n.S
 
 class PickOnMapModel(nav: AppNav, val onPicked: (Place) -> Unit) : ScreenModel(nav) {
     var center by mutableStateOf<GeoPoint?>(null)
@@ -68,7 +69,7 @@ class PickOnMapModel(nav: AppNav, val onPicked: (Place) -> Unit) : ScreenModel(n
         val l = label
         onPicked(
             Place(
-                name = l?.name ?: "Pinned location",
+                name = l?.name ?: S.pinnedLocation,
                 lat = c.lat,
                 lon = c.lon,
                 subtitle = l?.subtitle,
@@ -101,7 +102,7 @@ fun PickOnMapScreen(model: PickOnMapModel) {
         FilledTonalIconButton(
             onClick = { model.nav.pop() },
             modifier = Modifier.statusBarsPadding().padding(12.dp),
-        ) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+        ) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, S.back) }
 
         Surface(
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
@@ -109,11 +110,11 @@ fun PickOnMapScreen(model: PickOnMapModel) {
             modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
         ) {
             Column(Modifier.navigationBarsPadding().padding(20.dp)) {
-                Text("Move the map to choose a spot", style = MaterialTheme.typography.labelMedium, color = LocalExtra.current.subtle)
+                Text(S.moveMapToChoose, style = MaterialTheme.typography.labelMedium, color = LocalExtra.current.subtle)
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        if (model.resolving) "Finding address…" else model.label?.name ?: "Pinned location",
+                        if (model.resolving) S.findingAddress else model.label?.name ?: S.pinnedLocation,
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -128,7 +129,7 @@ fun PickOnMapScreen(model: PickOnMapModel) {
                     enabled = model.center != null,
                     modifier = Modifier.fillMaxWidth().height(50.dp),
                     shape = CircleShape,
-                ) { Text("Choose this location") }
+                ) { Text(S.chooseThisLocation) }
             }
         }
     }

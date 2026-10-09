@@ -1,6 +1,7 @@
 package com.maslul.app.ui.components
 
 import com.maslul.app.data.IsraelZone
+import com.maslul.app.i18n.S
 import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -8,7 +9,6 @@ import java.util.Locale
 
 object Fmt {
     private val hm = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
-    private val dayFmt = DateTimeFormatter.ofPattern("EEE, d MMM", Locale.US)
 
     fun time(i: Instant): String = hm.format(i.atZone(IsraelZone))
 
@@ -16,8 +16,8 @@ object Fmt {
     fun relative(t: Instant, now: Instant): String {
         val sec = t.epochSecond - now.epochSecond
         return when {
-            sec < 45 -> "Now"
-            sec < 60 * 60 -> "${(sec + 30) / 60} min"
+            sec < 45 -> S.now
+            sec < 60 * 60 -> S.min((sec + 30) / 60)
             else -> time(t)
         }
     }
@@ -26,23 +26,23 @@ object Fmt {
     fun ago(t: Instant, now: Instant): String {
         val sec = (now.epochSecond - t.epochSecond).coerceAtLeast(0)
         return when {
-            sec < 5 -> "Updated just now"
-            sec < 60 -> "Updated ${sec}s ago"
-            sec < 60 * 60 -> "Updated ${sec / 60} min ago"
-            else -> "Updated at ${time(t)}"
+            sec < 5 -> S.updatedJustNow
+            sec < 60 -> S.updatedSecAgo(sec)
+            sec < 60 * 60 -> S.updatedMinAgo(sec / 60)
+            else -> S.updatedAt(time(t))
         }
     }
 
     fun duration(sec: Long): String {
         val m = ((sec + 30) / 60).coerceAtLeast(1)
-        return if (m < 60) "$m min" else "${m / 60} h ${(m % 60).toString().padStart(2, '0')} min".replace(" 00 min", "")
+        return if (m < 60) S.min(m) else S.hoursMin(m / 60, m % 60)
     }
 
-    fun distance(m: Double): String = if (m < 1000) "${(m / 10).toInt() * 10} m" else "%.1f km".format(Locale.US, m / 1000)
+    fun distance(m: Double): String = if (m < 1000) S.meters((m / 10).toInt() * 10) else S.km("%.1f".format(Locale.US, m / 1000))
 
     fun day(date: LocalDate, today: LocalDate = LocalDate.now(IsraelZone)): String = when (date) {
-        today -> "Today"
-        today.plusDays(1) -> "Tomorrow"
-        else -> dayFmt.format(date)
+        today -> S.today
+        today.plusDays(1) -> S.tomorrow
+        else -> S.date(date)
     }
 }

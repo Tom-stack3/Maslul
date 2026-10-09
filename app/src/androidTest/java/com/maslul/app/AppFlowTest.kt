@@ -166,6 +166,25 @@ class AppFlowTest {
         }
     }
 
+    @Test
+    fun switchingLanguageRedrawsTheApp() {
+        try {
+            rule.onNodeWithText("Where to?").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Settings").performClick()
+            rule.onNodeWithTag("lang_he").performClick()
+            // Settings speaks Hebrew at once, and back home too.
+            rule.onNodeWithText("הגדרות").assertIsDisplayed()
+            rule.onNodeWithContentDescription("חזרה").performClick()
+            rule.onNodeWithText("לאן?").assertIsDisplayed()
+            rule.onNodeWithText("קווים").assertIsDisplayed()
+            rule.onNodeWithContentDescription("הגדרות").performClick()
+            rule.onNodeWithTag("lang_ru").performClick()
+            rule.onNodeWithText("Настройки").assertIsDisplayed()
+        } finally {
+            rule.runOnUiThread { MaslulApp.instance.store.updateSettings { it.copy(language = null) } }
+        }
+    }
+
     private fun openNewShuttle() {
         rule.onNodeWithText("Where to?").assertIsDisplayed()
         rule.onNodeWithContentDescription("Settings").performClick()

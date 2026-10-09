@@ -2,13 +2,13 @@ package com.maslul.app.ui.simple
 
 import androidx.compose.runtime.staticCompositionLocalOf
 import com.maslul.app.data.SimpleIcon
-import com.maslul.app.data.SimpleLanguage
+import com.maslul.app.data.AppLanguage
 import com.maslul.app.data.TransitMode
 import java.time.DayOfWeek
 
 /**
- * Everything Simple Maslul says, in each of its languages. The full app is English-only;
- * Simple Maslul is meant for people who'd rather read their own language.
+ * Everything Simple Maslul says, in each of its languages: fewer, plainer and bigger words than
+ * the full app's (see [com.maslul.app.i18n.Strings]).
  */
 abstract class SimpleStrings {
     abstract val appName: String
@@ -76,10 +76,10 @@ abstract class SimpleStrings {
     abstract fun mode(mode: TransitMode): String
 
     companion object {
-        fun of(lang: SimpleLanguage): SimpleStrings = when (lang) {
-            SimpleLanguage.EN -> English
-            SimpleLanguage.HE -> Hebrew
-            SimpleLanguage.RU -> Russian
+        fun of(lang: AppLanguage): SimpleStrings = when (lang) {
+            AppLanguage.EN -> English
+            AppLanguage.HE -> Hebrew
+            AppLanguage.RU -> Russian
         }
 
         /** Russian noun form for [n]: one (1, 21), few (2–4, 22–24) or many (5–20, 25…). */

@@ -5,6 +5,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.temporal.ChronoUnit
+import com.maslul.app.i18n.S
 
 /**
  * Client for Transitous (https://transitous.org), a free community-run MOTIS instance that
@@ -72,7 +73,9 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
             .build()
         val dto = Http.getJson<PlanDto>(url)
         return PlanResult(
-            itineraries = dto.itineraries.map { it.toDomain() }.filter { it.legs.any { l -> l.mode.isTransit } },
+            itineraries = dto.itineraries.map { it.toDomain() }
+                // A lift is one drive: a car again after walking would need the car to be waiting there.
+                .filter { it.legs.any { l -> l.mode.isTransit } && it.legs.count { l -> l.mode == TransitMode.CAR } <= 1 },
             walkOnly = dto.direct.firstOrNull { it.legs.all { l -> l.mode == "WALK" } }?.toDomain(),
             nextCursor = dto.nextPageCursor,
             previousCursor = dto.previousPageCursor,
@@ -305,21 +308,7 @@ class LegDto(
 
     private fun describeStep(s: StepDto): String {
         val street = s.streetName?.takeIf { it.isNotBlank() }
-        val dir = when (s.relativeDirection) {
-            "LEFT" -> "Turn left"
-            "RIGHT" -> "Turn right"
-            "SLIGHTLY_LEFT" -> "Bear left"
-            "SLIGHTLY_RIGHT" -> "Bear right"
-            "HARD_LEFT" -> "Sharp left"
-            "HARD_RIGHT" -> "Sharp right"
-            "UTURN_LEFT", "UTURN_RIGHT" -> "Make a U-turn"
-            "DEPART" -> "Head out"
-            "ELEVATOR" -> "Take the elevator"
-            "STAIRS" -> "Take the stairs"
-            "CIRCLE_CLOCKWISE", "CIRCLE_COUNTERCLOCKWISE" -> "Take the roundabout"
-            else -> "Continue"
-        }
-        return if (street != null) "$dir on $street" else dir
+        return S.walkStep(s.relativeDirection, street)
     }
 }
 
@@ -425,7 +414,7 @@ class StopTimeDto(
         val time = call.scheduledDeparture ?: call.scheduledArrival ?: return null
         val mode = TransitMode.fromMotis(mode)
         val label = (routeShortName ?: displayName)?.takeIf { it.isNotBlank() && it != "NaN" }
-            ?: if (mode == TransitMode.TRAIN) "Train" else "—"
+            ?: if (mode == TransitMode.TRAIN) S.mode(TransitMode.TRAIN) else "—"
         return Departure(
             tripId = tripId,
             routeId = routeId,

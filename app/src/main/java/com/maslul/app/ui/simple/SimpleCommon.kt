@@ -49,21 +49,15 @@ import androidx.compose.ui.unit.sp
 import com.maslul.app.MaslulApp
 import com.maslul.app.R
 import com.maslul.app.data.Place
-import com.maslul.app.data.Settings
 import com.maslul.app.data.SimpleButton
 import com.maslul.app.data.SimpleIcon
-import com.maslul.app.data.SimpleLanguage
-import java.util.Locale
-
-/** The language Simple Maslul speaks: the one picked, else the phone's. */
-fun Settings.simpleLanguageOrDefault(): SimpleLanguage =
-    simpleLanguage ?: SimpleLanguage.forLocale(Locale.getDefault().language)
+import com.maslul.app.data.languageOrDefault
 
 /** Gives Simple Maslul screens their language's words and reading direction. */
 @Composable
 fun SimpleFrame(content: @Composable () -> Unit) {
     val data by MaslulApp.instance.store.data.collectAsState()
-    val lang = data.settings.simpleLanguageOrDefault()
+    val lang = data.settings.languageOrDefault()
     CompositionLocalProvider(
         LocalSimpleStrings provides SimpleStrings.of(lang),
         LocalLayoutDirection provides if (lang.rtl) LayoutDirection.Rtl else LayoutDirection.Ltr,

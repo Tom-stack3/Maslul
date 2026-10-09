@@ -45,6 +45,41 @@ data class Settings(
     val rides: Boolean = true,
     /** Offers planning from the bus or train you're on. */
     val onBoard: Boolean = true,
+    /** Simple Maslul: a few big buttons and plain directions instead of the full app. */
+    val simpleMode: Boolean = false,
+    /** Simple Maslul's language; null follows the phone's. */
+    val simpleLanguage: SimpleLanguage? = null,
+)
+
+/** Languages Simple Maslul speaks. */
+@Serializable
+enum class SimpleLanguage(val code: String, val label: String, val rtl: Boolean) {
+    EN("en", "English", false), HE("he", "עברית", true), RU("ru", "Русский", false);
+
+    companion object {
+        /** The language for a phone set to [tag] (Android still reports Hebrew as "iw"). */
+        fun forLocale(tag: String): SimpleLanguage = when (tag.substringBefore('-').substringBefore('_').lowercase()) {
+            "he", "iw" -> HE
+            "ru" -> RU
+            else -> EN
+        }
+    }
+}
+
+/** Picture on a Simple Maslul button. */
+@Serializable
+enum class SimpleIcon {
+    HOME, FAMILY, HEART, FRIENDS, WORK, SCHOOL, SHOPPING, CAFE, RESTAURANT, HEALTH, PARK, POOL, GYM, SPORTS, STAR,
+}
+
+/** One of Simple Maslul's place buttons. A blank [label] shows the icon's name in the current language. */
+@Serializable
+data class SimpleButton(val icon: SimpleIcon, val label: String = "", val place: Place? = null)
+
+/** Home, the grandkids, work, the rest of the family and shopping, ready to be given addresses. */
+val DefaultSimpleButtons = listOf(
+    SimpleButton(SimpleIcon.HOME), SimpleButton(SimpleIcon.FAMILY), SimpleButton(SimpleIcon.WORK),
+    SimpleButton(SimpleIcon.HEART), SimpleButton(SimpleIcon.SHOPPING),
 )
 
 @Serializable
@@ -77,7 +112,23 @@ data class UserData(
     val favoriteStops: List<Place> = emptyList(),
     val shuttles: List<Shuttle> = emptyList(),
     val settings: Settings = Settings(),
+    val simpleButtons: List<SimpleButton> = DefaultSimpleButtons,
 )
+
+/** Simple Maslul's buttons, with Home and Work falling back to the places saved in the full app. */
+fun UserData.simpleSlots(): List<SimpleButton> = simpleButtons.map { b ->
+    if (b.place != null) b
+    else when (b.icon) {
+        SimpleIcon.HOME -> b.copy(place = home)
+        SimpleIcon.WORK -> b.copy(place = work)
+        else -> b
+    }
+}
+
+fun UserData.withSimpleButton(index: Int, b: SimpleButton): UserData {
+    if (index !in simpleButtons.indices) return this
+    return copy(simpleButtons = simpleButtons.toMutableList().also { it[index] = b })
+}
 
 /** Moves legacy unlabeled favourites into [UserData.favoritePlaces], labelled with the place name. */
 fun UserData.migrated(): UserData {
@@ -166,6 +217,8 @@ class UserStore(context: Context) {
     }
 
     fun updateSettings(f: (Settings) -> Settings) = edit { it.copy(settings = f(it.settings)) }
+
+    fun setSimpleButton(index: Int, b: SimpleButton) = edit { it.withSimpleButton(index, b) }
 
     /** Adds [s], or replaces the shuttle with its id. */
     fun saveShuttle(s: Shuttle) = edit { d ->

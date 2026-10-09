@@ -10,12 +10,14 @@ import com.maslul.app.MaslulApp
 import com.maslul.app.ui.lines.LinesHomeModel
 import com.maslul.app.ui.lines.StationsHomeModel
 import com.maslul.app.ui.nav.NavHomeModel
+import com.maslul.app.ui.simple.SimpleHomeModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 
-enum class Tab { NAVIGATE, LINES, STATIONS }
+/** The full app's tabs, and [SIMPLE] for Simple Maslul (which has no tab bar). */
+enum class Tab { NAVIGATE, LINES, STATIONS, SIMPLE }
 
 /** State holder for one screen on a back stack; lives until the screen is popped. */
 abstract class ScreenModel(val nav: AppNav) {
@@ -28,11 +30,12 @@ abstract class ScreenModel(val nav: AppNav) {
 }
 
 class AppNav : ViewModel() {
-    var tab by mutableStateOf(Tab.NAVIGATE)
+    var tab by mutableStateOf(if (MaslulApp.instance.store.data.value.settings.simpleMode) Tab.SIMPLE else Tab.NAVIGATE)
     private val stacks: Map<Tab, SnapshotStateList<ScreenModel>> = mapOf(
         Tab.NAVIGATE to mutableStateListOf(NavHomeModel(this)),
         Tab.LINES to mutableStateListOf(LinesHomeModel(this)),
         Tab.STATIONS to mutableStateListOf(StationsHomeModel(this)),
+        Tab.SIMPLE to mutableStateListOf(SimpleHomeModel(this)),
     )
 
     /** Incremented on navigation so transitions know the direction. */

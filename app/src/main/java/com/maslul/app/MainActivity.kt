@@ -34,6 +34,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -75,6 +76,17 @@ import com.maslul.app.ui.nav.SearchModel
 import com.maslul.app.ui.nav.SearchScreen
 import com.maslul.app.ui.nav.SettingsModel
 import com.maslul.app.ui.nav.SettingsScreen
+import com.maslul.app.ui.simple.SimpleHomeModel
+import com.maslul.app.ui.simple.SimpleHomeScreen
+import com.maslul.app.ui.simple.SimpleRoutesModel
+import com.maslul.app.ui.simple.SimpleRoutesScreen
+import com.maslul.app.ui.simple.SimpleSearchModel
+import com.maslul.app.ui.simple.SimpleSearchScreen
+import com.maslul.app.ui.simple.SimpleSettingsModel
+import com.maslul.app.ui.simple.SimpleSettingsScreen
+import com.maslul.app.ui.simple.SimpleTripModel
+import com.maslul.app.ui.simple.SimpleTripScreen
+import com.maslul.app.ui.simple.simpleLanguageOrDefault
 import com.maslul.app.ui.theme.MaslulTheme
 
 class MainActivity : ComponentActivity() {
@@ -85,6 +97,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             val data by MaslulApp.instance.store.data.collectAsState()
+            val simple = data.settings.simpleMode
+            val simpleLanguage = data.settings.simpleLanguageOrDefault()
+            LaunchedEffect(simple, simpleLanguage) {
+                // Simple Maslul asks for stop and line names in its language; the full app keeps the feed's.
+                MaslulApp.instance.repo.language = if (simple) simpleLanguage.code else null
+                if (simple != (nav.tab == Tab.SIMPLE)) nav.selectTab(if (simple) Tab.SIMPLE else Tab.NAVIGATE)
+            }
             MaslulTheme(data.settings.theme) {
                 AppShell(nav)
             }
@@ -94,7 +113,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppShell(nav: AppNav) {
-    BackHandler(enabled = !nav.atRoot || nav.tab != Tab.NAVIGATE) {
+    BackHandler(enabled = !nav.atRoot || (nav.tab != Tab.NAVIGATE && nav.tab != Tab.SIMPLE)) {
         if (!nav.pop()) nav.selectTab(Tab.NAVIGATE)
     }
     val session by ActiveTrip.session.collectAsState()
@@ -149,7 +168,7 @@ fun AppShell(nav: AppNav) {
                 }
             }
         }
-        if (nav.atRoot) {
+        if (nav.atRoot && nav.tab != Tab.SIMPLE) {
             NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
                 NavigationBarItem(
                     selected = nav.tab == Tab.NAVIGATE,
@@ -194,6 +213,11 @@ private fun ScreenHost(screen: ScreenModel) {
         is LineModel -> LineScreen(screen)
         is StopModel -> StopScreen(screen)
         is TripModel -> TripScreen(screen)
+        is SimpleHomeModel -> SimpleHomeScreen(screen)
+        is SimpleSearchModel -> SimpleSearchScreen(screen)
+        is SimpleRoutesModel -> SimpleRoutesScreen(screen)
+        is SimpleTripModel -> SimpleTripScreen(screen)
+        is SimpleSettingsModel -> SimpleSettingsScreen(screen)
         else -> Text("Unknown screen")
     }
 }

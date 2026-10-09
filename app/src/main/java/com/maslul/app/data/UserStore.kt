@@ -42,9 +42,9 @@ data class Settings(
     val railPreference: RailPreference = RailPreference.NONE,
     val reminderMinutes: Int = 5,
     /** Offers planning around a ride (טרמפ) for the first part of a trip. */
-    val rides: Boolean = false,
+    val rides: Boolean = true,
     /** Offers planning from the bus or train you're on. */
-    val onBoard: Boolean = false,
+    val onBoard: Boolean = true,
 )
 
 @Serializable

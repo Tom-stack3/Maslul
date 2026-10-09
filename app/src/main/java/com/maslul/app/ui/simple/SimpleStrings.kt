@@ -176,6 +176,9 @@ private object English : SimpleStrings() {
         SimpleIcon.SCHOOL -> "School"
         SimpleIcon.CAFE -> "Café"
         SimpleIcon.POOL -> "Pool"
+        SimpleIcon.RESTAURANT -> "Restaurant"
+        SimpleIcon.GYM -> "Gym"
+        SimpleIcon.SPORTS -> "Sports"
     }
 
     override fun mode(mode: TransitMode) = when (mode) {
@@ -278,6 +281,9 @@ private object Hebrew : SimpleStrings() {
         SimpleIcon.SCHOOL -> "בית ספר"
         SimpleIcon.CAFE -> "בית קפה"
         SimpleIcon.POOL -> "בריכה"
+        SimpleIcon.RESTAURANT -> "מסעדה"
+        SimpleIcon.GYM -> "חדר כושר"
+        SimpleIcon.SPORTS -> "ספורט"
     }
 
     override fun mode(mode: TransitMode) = when (mode) {
@@ -377,6 +383,9 @@ private object Russian : SimpleStrings() {
         SimpleIcon.SCHOOL -> "Школа"
         SimpleIcon.CAFE -> "Кафе"
         SimpleIcon.POOL -> "Бассейн"
+        SimpleIcon.RESTAURANT -> "Ресторан"
+        SimpleIcon.GYM -> "Спортзал"
+        SimpleIcon.SPORTS -> "Спорт"
     }
 
     override fun mode(mode: TransitMode) = when (mode) {

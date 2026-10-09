@@ -42,9 +42,9 @@ data class Settings(
     val railPreference: RailPreference = RailPreference.NONE,
     val reminderMinutes: Int = 5,
     /** Offers planning around a ride (טרמפ) for the first part of a trip. */
-    val rides: Boolean = false,
+    val rides: Boolean = true,
     /** Offers planning from the bus or train you're on. */
-    val onBoard: Boolean = false,
+    val onBoard: Boolean = true,
     /** Simple Maslul: a few big buttons and plain directions instead of the full app. */
     val simpleMode: Boolean = false,
     /** Simple Maslul's language; null follows the phone's. */
@@ -68,16 +68,18 @@ enum class SimpleLanguage(val code: String, val label: String, val rtl: Boolean)
 
 /** Picture on a Simple Maslul button. */
 @Serializable
-enum class SimpleIcon { HOME, FAMILY, WORK, HEALTH, SHOPPING, FRIENDS, PARK, STAR, HEART, SCHOOL, CAFE, POOL }
+enum class SimpleIcon {
+    HOME, FAMILY, HEART, FRIENDS, WORK, SCHOOL, SHOPPING, CAFE, RESTAURANT, HEALTH, PARK, POOL, GYM, SPORTS, STAR,
+}
 
 /** One of Simple Maslul's place buttons. A blank [label] shows the icon's name in the current language. */
 @Serializable
 data class SimpleButton(val icon: SimpleIcon, val label: String = "", val place: Place? = null)
 
-/** Home, the grandkids, work, the doctor and shopping, ready to be given addresses. */
+/** Home, the grandkids, work, the rest of the family and shopping, ready to be given addresses. */
 val DefaultSimpleButtons = listOf(
     SimpleButton(SimpleIcon.HOME), SimpleButton(SimpleIcon.FAMILY), SimpleButton(SimpleIcon.WORK),
-    SimpleButton(SimpleIcon.HEALTH), SimpleButton(SimpleIcon.SHOPPING),
+    SimpleButton(SimpleIcon.HEART), SimpleButton(SimpleIcon.SHOPPING),
 )
 
 @Serializable

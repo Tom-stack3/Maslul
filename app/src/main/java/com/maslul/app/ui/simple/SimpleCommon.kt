@@ -15,12 +15,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.FamilyRestroom
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FitnessCenter
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LocalCafe
 import androidx.compose.material.icons.rounded.LocalHospital
 import androidx.compose.material.icons.rounded.Park
 import androidx.compose.material.icons.rounded.Pool
+import androidx.compose.material.icons.rounded.Restaurant
 import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.ShoppingCart
 import androidx.compose.material.icons.rounded.Star
@@ -37,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -44,6 +47,8 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.maslul.app.MaslulApp
+import com.maslul.app.R
+import com.maslul.app.data.Place
 import com.maslul.app.data.Settings
 import com.maslul.app.data.SimpleButton
 import com.maslul.app.data.SimpleIcon
@@ -65,9 +70,14 @@ fun SimpleFrame(content: @Composable () -> Unit) {
     ) { content() }
 }
 
+/** A place with its city, "Weizmann 14, Tel Aviv", so it's clear which one was picked. */
+val Place.withCity: String get() = listOfNotNull(name, subtitle?.takeIf { it.isNotBlank() && it != name }).joinToString(", ")
+
 /** A button's name: the one given, else its picture's name in the current language. */
 fun SimpleButton.title(s: SimpleStrings): String = label.trim().ifEmpty { s.iconName(icon) }
 
+/** The same pictures as the full app's favourites, plus family, friends and work. */
+@Composable
 fun SimpleIcon.vector(): ImageVector = when (this) {
     SimpleIcon.HOME -> Icons.Rounded.Home
     SimpleIcon.FAMILY -> Icons.Rounded.FamilyRestroom
@@ -81,6 +91,9 @@ fun SimpleIcon.vector(): ImageVector = when (this) {
     SimpleIcon.SCHOOL -> Icons.Rounded.School
     SimpleIcon.CAFE -> Icons.Rounded.LocalCafe
     SimpleIcon.POOL -> Icons.Rounded.Pool
+    SimpleIcon.RESTAURANT -> Icons.Rounded.Restaurant
+    SimpleIcon.GYM -> Icons.Rounded.FitnessCenter
+    SimpleIcon.SPORTS -> ImageVector.vectorResource(R.drawable.ic_sports_and_outdoors)
 }
 
 /** One strong colour per button, so each is easy to tell apart (white text reads on all of them). */

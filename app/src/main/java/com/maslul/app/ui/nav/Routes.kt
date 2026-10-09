@@ -76,6 +76,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -1020,13 +1021,17 @@ fun RideSheet(current: RideOffer?, onDismiss: () -> Unit, onPickDestination: () 
 /** Departures listed per ride before the rest fold into "N more". */
 const val SHOWN_RIDES = 3
 
-/** "16 / 92 / 5": every line that makes a combined ride, soonest first. */
+/** "16 / 92 / 5 +2": the first few lines that makes a combined ride, soonest first. */
 @Composable
 fun CombinedBadges(rides: List<Leg>) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        rides.distinctBy { it.lineLabel }.forEachIndexed { i, o ->
+        val lines = rides.distinctBy { it.lineLabel }
+        lines.take(SHOWN_RIDES).forEachIndexed { i, o ->
             if (i > 0) Text(" / ", style = MaterialTheme.typography.labelMedium, color = LocalExtra.current.subtle)
             LineBadge(o.lineLabel, o.mode, color = lineColor(o), showIcon = i == 0)
+        }
+        if (lines.size > SHOWN_RIDES) {
+            Text(" +${lines.size - SHOWN_RIDES}", style = MaterialTheme.typography.labelLarge, color = LocalExtra.current.subtle)
         }
     }
 }
@@ -1051,8 +1056,9 @@ fun RideOptions(
     val all = rides.map { it to liveOf(it) }.sortedBy { (o, c) -> Combine.boards(o, c) }
         .filter { (o, _) -> perLine.merge(Combine.lineKey(o), 1, Int::plus)!! <= 2 }
     val lines = all.distinctBy { Combine.lineKey(it.first) }.size
-    val options = all.take(SHOWN_RIDES)
-    val more = all.size - options.size
+    var expanded by rememberSaveable(leg.rideKey) { mutableStateOf(false) }
+    val options = if (expanded) all else all.take(SHOWN_RIDES)
+    val more = all.size - SHOWN_RIDES
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 12.dp, vertical = 9.dp),
@@ -1085,8 +1091,11 @@ fun RideOptions(
                 }
             }
             if (more > 0) {
-                Text("+$more more", style = MaterialTheme.typography.labelLarge, color = x.subtle,
-                    modifier = Modifier.align(Alignment.CenterVertically).testTag("more_rides"))
+                Text(if (expanded) "Show fewer" else "+$more more", style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.align(Alignment.CenterVertically).clip(RoundedCornerShape(8.dp))
+                        .clickable { expanded = !expanded }.padding(horizontal = 4.dp, vertical = 4.dp)
+                        .testTag("more_rides"))
             }
         }
     }

@@ -1,6 +1,6 @@
 # Advanced features
 
-Maslul stays simple by default. These tools are for trips the usual planner can't help with. Each one is off until you switch it on in **Settings → Advanced**, so nothing changes for you unless you want it to.
+These tools are for trips the usual planner can't help with. **Getting a ride** and **Already on a bus** are on from the start; turn either off in **Settings → Advanced** if you don't need it.
 
 <img src="screenshots/advanced/settings.png" width="270" alt="Settings, Advanced section: Getting a ride (טרמפ), Already on a bus, My shuttles">
 
@@ -8,7 +8,7 @@ Maslul stays simple by default. These tools are for trips the usual planner can'
 
 Someone is driving you part of the way, and you'll go on by bus or train. The question is where to get out.
 
-Turn on **Getting a ride (טרמפ)**. Then, on the route results, tap the **Ride** chip and choose one of these:
+On the route results, tap the **Ride** chip and choose one of these:
 
 - **The driver is going somewhere.** Pick where they're heading. Maslul follows their route and tries places along the way to be dropped off. For each place it plans the rest of your trip from the time you'd get there, then shows the best ones. Each option says where to get out, for example "Get dropped off near Netanya central station · 10:00 · 25 min by car".
 - **The driver can take me up to…** If someone offers "I'll take you wherever, but only about 10 minutes away", pick how long they'll drive. Maslul finds the best place to be dropped off within that drive. If your destination is close enough, one option is just driving all the way.
@@ -37,7 +37,7 @@ From then on, trip planning offers the shuttle wherever it helps, on its own or 
 
 You're already on a bus or train, and wondering where to get off, or whether to change.
 
-Turn on **Already on a bus**. A small **On a bus?** button appears on the map; the From field also offers **On a bus or train now**.
+A small **On a bus?** button appears on the map; the From field also offers **On a bus or train now**.
 
 1. **Pick your ride.** You'll see the buses and trains around you, live ones nearest first. You can type a line number or destination to filter, or pick a mode.
 2. **Choose where you're going.**

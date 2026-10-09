@@ -13,12 +13,14 @@ Get the latest APK from the [Releases](../../releases) page. A Play Store releas
 - Route planning, combining buses that ride the same stretch, with a pick of which bus to take
 - Live arrivals, color-coded by how fresh the data is (live / stale / timetable only)
 - Live bus locations on the map, updated automatically
-- Catches earlier buses that are running late, not just the next scheduled one
+- Warns about tight transfers ("2 min to catch 143 after a 200 m walk") and says what happens if you miss it: the next bus and how much later you'd be
 - Line and stop screens, favorites, trip reminders
 - Operator colors (Egged, Dan, Metropoline, …) and bus platform numbers at big stations
-- Rotatable map with a compass and a direction beam on your location
-- Simple Maslul: an optional mode with six big buttons (five places you set, plus any address) and plain step-by-step directions in English, Hebrew or Russian, made for grandparents and anyone who wants it easy. Turn it on in Settings
-- Optional [advanced tools](docs/advanced-features.md): find where to be dropped off when someone gives you a ride (טרמפ), add your own shuttles (like a company bus), and plan from the bus you're already on
+- **Simple Maslul**: an optional mode with six big buttons and plain step-by-step directions, in English, Hebrew or Russian. Made for grandparents; turn it on in Settings
+- [Advanced tools](docs/advanced-features.md) for trips a normal planner can't help with:
+  - **Getting a ride (טרמפ):** someone's driving you part of the way. Tell Maslul where the driver is heading, or how far they'll take you, and it finds the best place to be dropped off to continue by bus or train
+  - **Already on a bus:** pick the bus or train you're on and where you're going. Maslul tells you where to get off, and whether changing at the next stop is better
+  - **My shuttles:** add shuttles that aren't in the public timetables, like a company bus to the train station, and trips will use them alongside buses and trains
 
 ## Data sources
 

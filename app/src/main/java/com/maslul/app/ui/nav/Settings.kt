@@ -30,6 +30,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.foundation.background
@@ -110,6 +111,7 @@ fun SettingsScreen(model: SettingsModel) {
     val s = data.settings
     var taps by remember { mutableIntStateOf(0) }
     var drives by remember { mutableIntStateOf(0) }
+    var confirmSimple by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(Modifier.statusBarsPadding().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -171,10 +173,7 @@ fun SettingsScreen(model: SettingsModel) {
                 "Big buttons for a few places and plain step-by-step directions, in English, Hebrew or Russian. " +
                     "Good for grandparents.",
                 s.simpleMode, Modifier.testTag("simple_switch"),
-            ) { c ->
-                model.store.updateSettings { it.copy(simpleMode = c) }
-                if (c) model.nav.selectTab(Tab.SIMPLE)
-            }
+            ) { c -> if (c) confirmSimple = true }
 
             SectionHeader("Advanced")
             SettingSwitch(
@@ -253,6 +252,24 @@ fun SettingsScreen(model: SettingsModel) {
     if (drives > 0) DrivingBus(drives, Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(bottom = 12.dp))
     }
     FavoriteDialogHost(model.store, model.favoriteDraft) { model.favoriteDraft = null }
+    if (confirmSimple) {
+        AlertDialog(
+            onDismissRequest = { confirmSimple = false },
+            title = { Text("Switch to Simple Maslul?") },
+            text = {
+                Text("Maslul becomes six big buttons and plain step-by-step directions, without maps, lines or stations. " +
+                    "To come back, open Settings in Simple Maslul and choose \"Switch to full Maslul\".")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmSimple = false
+                    model.store.updateSettings { it.copy(simpleMode = true) }
+                    model.nav.selectTab(Tab.SIMPLE)
+                }, modifier = Modifier.testTag("simple_confirm")) { Text("Switch") }
+            },
+            dismissButton = { TextButton(onClick = { confirmSimple = false }) { Text("Cancel") } },
+        )
+    }
 }
 
 /** A setting row that toggles when tapped anywhere. */

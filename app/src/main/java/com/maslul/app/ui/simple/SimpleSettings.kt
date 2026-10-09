@@ -1,5 +1,6 @@
 package com.maslul.app.ui.simple
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -42,6 +43,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -142,7 +145,7 @@ fun SimpleSettingsScreen(model: SimpleSettingsModel) = SimpleFrame {
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
                             Text(b.title(s), fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
-                            Text(b.place?.name ?: s.notSet, fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            Text(b.place?.withCity ?: s.notSet, fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Icon(Icons.Rounded.Edit, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -201,27 +204,11 @@ private fun EditDialog(model: SimpleSettingsModel, index: Int, draft: SimpleButt
                 Text(s.picture, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(6.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    SimpleIcon.entries.forEach { ic ->
-                        val on = ic == draft.icon
-                        Box(
-                            Modifier.size(46.dp).clip(CircleShape)
-                                .background(if (on) slotColor(index) else MaterialTheme.colorScheme.surfaceVariant)
-                                .then(if (on) Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Surface(onClick = { model.draft = draft.copy(icon = ic) }, color = Color.Transparent, shape = CircleShape,
-                                modifier = Modifier.fillMaxSize()) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(ic.vector(), s.iconName(ic), Modifier.size(26.dp),
-                                        tint = if (on) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
-                    }
+                    SimpleIcon.entries.forEach { ic -> IconChoice(ic, ic == draft.icon, s.iconName(ic)) { model.draft = draft.copy(icon = ic) } }
                 }
                 Spacer(Modifier.height(14.dp))
                 Text(s.address, fontWeight = FontWeight.SemiBold)
-                Text(draft.place?.name ?: s.notSet, fontSize = 18.sp)
+                Text(draft.place?.withCity ?: s.notSet, fontSize = 18.sp)
                 Row {
                     TextButton(onClick = { model.pickAddress(s.whereIs(draft.title(s))) }) { Text(s.changeAddress, fontSize = 17.sp) }
                     if (draft.place != null) {
@@ -233,4 +220,22 @@ private fun EditDialog(model: SimpleSettingsModel, index: Int, draft: SimpleButt
         confirmButton = { TextButton(onClick = model::save) { Text(s.save, fontSize = 18.sp) } },
         dismissButton = { TextButton(onClick = model::close) { Text(s.cancel, fontSize = 18.sp) } },
     )
+}
+
+/** One picture to choose, styled like the full app's favourite icons but a size larger. */
+@Composable
+private fun IconChoice(icon: SimpleIcon, selected: Boolean, name: String, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = if (selected) scheme.primaryContainer else scheme.surfaceVariant,
+        border = if (selected) BorderStroke(2.dp, scheme.primary) else null,
+        modifier = Modifier.size(48.dp).semantics { this.selected = selected },
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon.vector(), name, Modifier.size(26.dp),
+                tint = if (selected) scheme.onPrimaryContainer else scheme.onSurfaceVariant)
+        }
+    }
 }

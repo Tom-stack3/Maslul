@@ -148,6 +148,9 @@ import java.time.ZonedDateTime
 
 enum class TimeMode { NOW, DEPART, ARRIVE }
 
+/** Why a search came back empty, for screens that word [RoutesModel.error] their own way. */
+enum class RouteError { LOCATION, NO_ROUTES, NETWORK }
+
 class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
     var from by mutableStateOf(from)
     var to by mutableStateOf(to)
@@ -160,6 +163,8 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
         private set
     private var searchJob: kotlinx.coroutines.Job? = null
     var error by mutableStateOf<String?>(null)
+    var errorKind by mutableStateOf<RouteError?>(null)
+        private set
     var itineraries by mutableStateOf<List<Itinerary>>(emptyList())
     var walkOnly by mutableStateOf<Itinerary?>(null)
     var loadingMore by mutableStateOf(false)
@@ -303,10 +308,12 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
         searchJob?.cancel()
         refining = false
         searchJob = scope.launch {
-            // New results start at the top.
-            listState.scrollToItem(0)
+            // New results start at the top. On its own: scrolling waits for the list's first layout,
+            // and a screen that doesn't show this list (Simple Maslul) would hold up the search.
+            launch { listState.scrollToItem(0) }
             loading = true
             error = null
+            errorKind = null
             itineraries = emptyList()
             walkOnly = null
             raw = emptyList()
@@ -322,6 +329,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             if (fromPoint == null || toPoint == null) {
                 error = if (boardTrip != null) "Couldn't follow the ride you're on. Pick it again, or choose a starting point."
                     else "Your location isn't available. Allow location access or choose a starting point."
+                errorKind = RouteError.LOCATION
                 loading = false
                 return@launch
             }
@@ -342,9 +350,15 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
                     nextCursor = r.nextCursor
                     prevCursor = r.previousCursor
                     canPage = nextCursor != null || prevCursor != null
-                    if (found.isEmpty() && walkOnly == null) error = "No routes found for this time."
+                    if (found.isEmpty() && walkOnly == null) {
+                        error = "No routes found for this time."
+                        errorKind = RouteError.NO_ROUTES
+                    }
                 }
-                .onFailure { e -> error = if (e is NoDriveException) e.message else "Couldn't load routes. Check your connection." }
+                .onFailure { e ->
+                    error = if (e is NoDriveException) e.message else "Couldn't load routes. Check your connection."
+                    errorKind = if (e is NoDriveException) RouteError.NO_ROUTES else RouteError.NETWORK
+                }
             loading = false
             shuttleOptions?.await()?.takeIf { it.isNotEmpty() }?.let { extra ->
                 val ids = raw.map { it.id }.toSet()

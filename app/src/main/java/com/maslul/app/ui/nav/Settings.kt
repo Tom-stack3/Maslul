@@ -75,6 +75,7 @@ import androidx.compose.ui.platform.testTag
 import com.maslul.app.data.ThemeMode
 import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
+import com.maslul.app.ui.Tab
 import com.maslul.app.ui.components.PlaceRow
 import com.maslul.app.ui.components.SectionHeader
 import com.maslul.app.ui.theme.LocalExtra
@@ -162,6 +163,17 @@ fun SettingsScreen(model: SettingsModel) {
                     FilterChip(selected = s.reminderMinutes == m, onClick = { model.store.updateSettings { it.copy(reminderMinutes = m) } },
                         label = { Text("$m min") })
                 }
+            }
+
+            SectionHeader("Simple Maslul")
+            SettingSwitch(
+                "Simple Maslul",
+                "Big buttons for a few places and plain step-by-step directions, in English, Hebrew or Russian. " +
+                    "Good for grandparents.",
+                s.simpleMode, Modifier.testTag("simple_switch"),
+            ) { c ->
+                model.store.updateSettings { it.copy(simpleMode = c) }
+                if (c) model.nav.selectTab(Tab.SIMPLE)
             }
 
             SectionHeader("Advanced")

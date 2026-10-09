@@ -17,6 +17,7 @@ Get the latest APK from the [Releases](../../releases) page. A Play Store releas
 - Line and stop screens, favorites, trip reminders
 - Operator colors (Egged, Dan, Metropoline, …) and bus platform numbers at big stations
 - Rotatable map with a compass and a direction beam on your location
+- Simple Maslul: an optional mode with six big buttons (five places you set, plus any address) and plain step-by-step directions in English, Hebrew or Russian, made for grandparents and anyone who wants it easy. Turn it on in Settings
 - Optional [advanced tools](docs/advanced-features.md): find where to be dropped off when someone gives you a ride (טרמפ), add your own shuttles (like a company bus), and plan from the bus you're already on
 
 ## Data sources

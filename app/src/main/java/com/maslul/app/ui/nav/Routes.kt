@@ -1028,6 +1028,15 @@ private fun HintLine(icon: androidx.compose.ui.graphics.vector.ImageVector, titl
 /** "Bus 480", or just "Train" for a ride whose line is named after its mode. */
 fun rideName(l: Leg): String = rideName(l.mode, l.lineLabel)
 
+/** Whether [l] goes by its mode's name ("Train"), having no line number of its own. */
+private fun unnumbered(l: Leg) = l.lineLabel.equals(modeName(l.mode), ignoreCase = true) || l.lineLabel == "—"
+
+/** The ride to catch, mid-sentence: "143", or "the train" for one without a line number. */
+fun catchName(l: Leg): String = if (unnumbered(l)) S.theVehicle(l.mode) else l.lineLabel
+
+/** The ride after a missed one: "next 143", or "the next train". */
+fun nextName(l: Leg): String = if (unnumbered(l)) S.theNextVehicle(l.mode) else S.nextLine(l.lineLabel)
+
 fun rideName(mode: TransitMode, line: String): String = modeName(mode).let { m -> if (line.equals(m, ignoreCase = true)) m else "$m $line" }
 
 fun rideLabel(r: RideOffer?): String = when (r) {
@@ -1205,13 +1214,13 @@ fun TransferWarning(t: Ranking.Transfer, missed: Leg? = null, modifier: Modifier
         Spacer(Modifier.width(6.dp))
         Column {
             Text(
-                S.tightTransfer(min, t.next.lineLabel, if (t.walking) Fmt.distance(t.walkM) else null),
+                S.tightTransfer(min, catchName(t.next), if (t.walking) Fmt.distance(t.walkM) else null),
                 style = MaterialTheme.typography.bodySmall,
                 color = LocalExtra.current.subtle,
             )
             if (missed != null) {
                 Text(
-                    S.ifMissed(missed.lineLabel, Fmt.time(missed.start), Fmt.duration(missed.start.epochSecond - t.next.start.epochSecond)),
+                    S.ifMissed(nextName(missed), Fmt.time(missed.start), Fmt.duration(missed.start.epochSecond - t.next.start.epochSecond)),
                     style = MaterialTheme.typography.bodySmall,
                     color = LocalExtra.current.subtle,
                 )

@@ -186,7 +186,22 @@ internal object Hebrew : Strings() {
     override fun nMore(n: Int) = "+$n נוספים"
     override fun tightTransfer(min: Long, line: String, walk: String?) =
         "החלפה צפופה · ${if (min < 1) "פחות מדקה" else "$min דק׳"} כדי להספיק את $line" + (walk?.let { " אחרי הליכה של $it" } ?: "")
-    override fun ifMissed(line: String, time: String, later: String) = "אם תפספסו, ה־$line הבא ב־$time (+$later)"
+    override fun ifMissed(next: String, time: String, later: String) = "אם תפספסו, $next ב־$time (+$later)"
+    override fun theVehicle(mode: TransitMode) = when (mode) {
+        TransitMode.BUS -> "האוטובוס"
+        TransitMode.TRAIN, TransitMode.LIGHT_RAIL, TransitMode.METRO -> "הרכבת"
+        TransitMode.CABLE_CAR -> "הרכבל"
+        TransitMode.FERRY -> "המעבורת"
+        else -> "הנסיעה"
+    }
+    override fun theNextVehicle(mode: TransitMode) = when (mode) {
+        TransitMode.BUS -> "האוטובוס הבא"
+        TransitMode.TRAIN, TransitMode.LIGHT_RAIL, TransitMode.METRO -> "הרכבת הבאה"
+        TransitMode.CABLE_CAR -> "הרכבל הבא"
+        TransitMode.FERRY -> "המעבורת הבאה"
+        else -> "הנסיעה הבאה"
+    }
+    override fun nextLine(line: String) = "ה־$line הבא"
     override fun vehicleClose(mode: TransitMode) = when (mode) {
         TransitMode.BUS -> "האוטובוס קרוב"
         TransitMode.TRAIN, TransitMode.LIGHT_RAIL, TransitMode.METRO -> "הרכבת קרובה"

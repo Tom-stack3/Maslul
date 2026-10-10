@@ -178,7 +178,16 @@ internal object English : Strings() {
     override fun nMore(n: Int) = "+$n more"
     override fun tightTransfer(min: Long, line: String, walk: String?) =
         "Tight transfer · ${if (min < 1) "under 1 min" else "$min min"} to catch $line" + (walk?.let { " after a $it walk" } ?: "")
-    override fun ifMissed(line: String, time: String, later: String) = "If missed, next $line at $time (+$later)"
+    override fun ifMissed(next: String, time: String, later: String) = "If missed, $next at $time (+$later)"
+    override fun theVehicle(mode: TransitMode) = "the " + when (mode) {
+        TransitMode.BUS -> "bus"
+        TransitMode.TRAIN, TransitMode.LIGHT_RAIL, TransitMode.METRO -> "train"
+        TransitMode.CABLE_CAR -> "cable car"
+        TransitMode.FERRY -> "ferry"
+        else -> "ride"
+    }
+    override fun theNextVehicle(mode: TransitMode) = theVehicle(mode).replaceFirst("the ", "the next ")
+    override fun nextLine(line: String) = "next $line"
     override fun vehicleClose(mode: TransitMode) = when (mode) {
         TransitMode.BUS -> "bus is close"
         TransitMode.TRAIN, TransitMode.LIGHT_RAIL, TransitMode.METRO -> "train is close"

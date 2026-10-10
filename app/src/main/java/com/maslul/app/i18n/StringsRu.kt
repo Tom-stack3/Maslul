@@ -185,7 +185,24 @@ internal object Russian : Strings() {
     override fun tightTransfer(min: Long, line: String, walk: String?) =
         "Короткая пересадка · ${if (min < 1) "меньше минуты" else "$min мин"}, чтобы успеть на $line" +
             (walk?.let { " после $it пешком" } ?: "")
-    override fun ifMissed(line: String, time: String, later: String) = "Если опоздаете, следующий $line в $time (+$later)"
+    override fun ifMissed(next: String, time: String, later: String) = "Если опоздаете, $next в $time (+$later)"
+    override fun theVehicle(mode: TransitMode) = when (mode) {
+        TransitMode.BUS -> "автобус"
+        TransitMode.TRAIN, TransitMode.METRO -> "поезд"
+        TransitMode.LIGHT_RAIL -> "трамвай"
+        TransitMode.CABLE_CAR -> "канатную дорогу"
+        TransitMode.FERRY -> "паром"
+        else -> "рейс"
+    }
+    override fun theNextVehicle(mode: TransitMode) = when (mode) {
+        TransitMode.BUS -> "следующий автобус"
+        TransitMode.TRAIN, TransitMode.METRO -> "следующий поезд"
+        TransitMode.LIGHT_RAIL -> "следующий трамвай"
+        TransitMode.CABLE_CAR -> "следующая кабинка"
+        TransitMode.FERRY -> "следующий паром"
+        else -> "следующий рейс"
+    }
+    override fun nextLine(line: String) = "следующий $line"
     override fun vehicleClose(mode: TransitMode) = when (mode) {
         TransitMode.BUS -> "автобус близко"
         TransitMode.TRAIN, TransitMode.METRO -> "поезд близко"

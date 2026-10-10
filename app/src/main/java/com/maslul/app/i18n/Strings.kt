@@ -165,7 +165,11 @@ abstract class Strings {
     abstract val showFewer: String
     abstract fun nMore(n: Int): String
     abstract fun tightTransfer(min: Long, line: String, walk: String?): String
-    abstract fun ifMissed(line: String, time: String, later: String): String
+    abstract fun ifMissed(next: String, time: String, later: String): String
+    /** A ride without a line number, mid-sentence: "the train". */
+    abstract fun theVehicle(mode: TransitMode): String
+    abstract fun theNextVehicle(mode: TransitMode): String
+    abstract fun nextLine(line: String): String
     abstract fun vehicleClose(mode: TransitMode): String
     abstract val goNow: String
     abstract val leaveIn: String

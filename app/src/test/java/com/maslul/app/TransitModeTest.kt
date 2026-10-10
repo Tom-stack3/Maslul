@@ -24,6 +24,14 @@ class TransitModeTest {
     }
 
     @Test
+    fun aTrainWithoutANumberReadsAsTheTrain() {
+        assertEquals("Tight transfer · 3 min to catch the train", en.tightTransfer(3, en.theVehicle(TransitMode.TRAIN), null))
+        assertEquals("If missed, the next train at 21:40 (+30 min)", en.ifMissed(en.theNextVehicle(TransitMode.TRAIN), "21:40", "30 min"))
+        assertEquals("If missed, next 143 at 21:40 (+30 min)", en.ifMissed(en.nextLine("143"), "21:40", "30 min"))
+        assertEquals("אם תפספסו, הרכבת הבאה ב־21:40 (+30 דק׳)", he.ifMissed(he.theNextVehicle(TransitMode.TRAIN), "21:40", "30 דק׳"))
+    }
+
+    @Test
     fun ridesOfOneModeUseItsWord() {
         assertEquals("Next trains from A", en.nextFrom(TransitMode.LIGHT_RAIL, "A"))
         assertEquals("Next buses from A", en.nextFrom(TransitMode.BUS, "A"))

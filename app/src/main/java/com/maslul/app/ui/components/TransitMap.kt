@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RectF
 import android.view.Gravity
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animate
@@ -42,6 +43,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.maslul.app.data.GeoPoint
 import kotlin.math.abs
+import kotlin.math.hypot
 import com.maslul.app.ui.theme.LocalExtra
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -183,7 +185,16 @@ fun TransitMap(
             m.addOnMapClickListener { latLng ->
                 val cb = markerClick ?: return@addOnMapClickListener false
                 val pt = m.projection.toScreenLocation(latLng)
-                val hit = m.queryRenderedFeatures(pt, "m-markers", "m-vehicles").firstOrNull()
+                // Stops are drawn a few dp wide: search a finger-sized square and take the nearest one.
+                val reach = 24 * density.density
+                val box = RectF(pt.x - reach, pt.y - reach, pt.x + reach, pt.y + reach)
+                val hit = m.queryRenderedFeatures(box, "m-markers", "m-vehicles")
+                    .filter { it.hasNonNullValueForProperty("id") }
+                    .minByOrNull { f ->
+                        val p = f.geometry() as? Point ?: return@minByOrNull Float.MAX_VALUE
+                        val s = m.projection.toScreenLocation(LatLng(p.latitude(), p.longitude()))
+                        hypot(s.x - pt.x, s.y - pt.y)
+                    }
                 val id = hit?.getStringProperty("id")
                 if (id != null) { cb(id); true } else false
             }

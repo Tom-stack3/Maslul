@@ -261,6 +261,8 @@ class LegDto(
     val scheduledEndTime: String? = null,
     val distance: Double? = null,
     val headsign: String? = null,
+    /** Where the trip ends, which for trains is what the headsign (a train number) doesn't say. */
+    val tripTo: PlaceDto? = null,
     val routeId: String? = null,
     val routeColor: String? = null,
     val routeTextColor: String? = null,
@@ -289,7 +291,7 @@ class LegDto(
             // A walk after a car drop-off can come back a few seconds "shorter than nothing".
             end = if (!mode.isTransit && end.isBefore(start)) start else end,
             distanceM = distance ?: if (!mode.isTransit && geometry.size > 1) GeoMath.cumulative(geometry).last() else null,
-            headsign = headsign?.let { cleanHeadsign(it) },
+            headsign = headsign?.let { headsignOf(it, tripTo?.name) },
             routeShortName = routeShortName ?: displayName,
             routeLongName = routeLongName,
             routeColor = TransitousApi.parseColor(routeColor),
@@ -311,6 +313,13 @@ class LegDto(
         return S.walkStep(s.relativeDirection, street)
     }
 }
+
+/**
+ * Where a ride is heading, as riders read it. Israel Railways puts the train number in the
+ * headsign ("726"), so a train goes by where its trip ends ([tripTo]) instead.
+ */
+fun headsignOf(headsign: String, tripTo: String?): String =
+    if (headsign.isNotBlank() && headsign.all { it.isDigit() } && !tripTo.isNullOrBlank()) tripTo else cleanHeadsign(headsign)
 
 /** MOT headsigns are "City_Destination"; show "Destination, City". */
 fun cleanHeadsign(h: String): String {
@@ -398,6 +407,7 @@ class StopTimeDto(
     val place: PlaceDto = PlaceDto(),
     val mode: String = "BUS",
     val headsign: String = "",
+    val tripTo: PlaceDto? = null,
     val tripId: String = "",
     val routeId: String? = null,
     val routeShortName: String? = null,
@@ -420,7 +430,7 @@ class StopTimeDto(
             routeId = routeId,
             mode = mode,
             lineLabel = label,
-            headsign = cleanHeadsign(headsign),
+            headsign = headsignOf(headsign, tripTo?.name),
             agency = agencyName,
             routeColor = TransitousApi.parseColor(routeColor),
             scheduled = time,

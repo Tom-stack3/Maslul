@@ -15,6 +15,8 @@ Get the latest APK from the [Releases](../../releases) page. A Play Store releas
 - Live bus locations on the map, updated automatically
 - Warns about tight transfers ("2 min to catch 143 after a 200 m walk") and says what happens if you miss it: the next bus and how much later you'd be
 - Line and stop screens, favorites, trip reminders
+- In English, Hebrew (right to left) or Russian: follows the phone, or pick one in Settings
+- When nothing leaves soon nearby (late at night, on Shabbat), also looks for rides up to a 50-minute walk away instead of only offering tomorrow's first bus
 - Operator colors (Egged, Dan, Metropoline, …) and bus platform numbers at big stations
 - **Simple Maslul**: an optional mode with six big buttons and plain step-by-step directions, in English, Hebrew or Russian. Made for grandparents; turn it on in Settings
 - [Advanced tools](docs/advanced-features.md) for trips a normal planner can't help with:

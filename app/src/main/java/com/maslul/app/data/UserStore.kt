@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 
@@ -12,8 +13,8 @@ import kotlinx.serialization.encodeToString
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 @Serializable
-enum class WalkSpeed(val mps: Double, val label: String) {
-    SLOW(1.0, "Relaxed"), NORMAL(1.3, "Normal"), FAST(1.6, "Brisk")
+enum class WalkSpeed(val mps: Double) {
+    SLOW(1.0), NORMAL(1.3), FAST(1.6)
 }
 
 /**
@@ -22,8 +23,8 @@ enum class WalkSpeed(val mps: Double, val label: String) {
  * per bus boarded.
  */
 @Serializable
-enum class RailPreference(val label: String, val busMinuteCost: Double, val busLegSec: Double) {
-    NONE("No", 0.0, 0.0), PREFER("Yes", 0.35, 240.0), STRONG("Strongly", 0.75, 450.0)
+enum class RailPreference(val busMinuteCost: Double, val busLegSec: Double) {
+    NONE(0.0, 0.0), PREFER(0.35, 240.0), STRONG(0.75, 450.0)
 }
 
 /** Longest walk to or from a stop that route planning allows by default. */
@@ -47,24 +48,29 @@ data class Settings(
     val onBoard: Boolean = true,
     /** Simple Maslul: a few big buttons and plain directions instead of the full app. */
     val simpleMode: Boolean = false,
-    /** Simple Maslul's language; null follows the phone's. */
-    val simpleLanguage: SimpleLanguage? = null,
+    /** The app's language (the full app's and Simple Maslul's); null follows the phone's. */
+    @SerialName("simpleLanguage")
+    val language: AppLanguage? = null,
 )
 
-/** Languages Simple Maslul speaks. */
+/** Languages Maslul speaks. */
 @Serializable
-enum class SimpleLanguage(val code: String, val label: String, val rtl: Boolean) {
+enum class AppLanguage(val code: String, val label: String, val rtl: Boolean) {
     EN("en", "English", false), HE("he", "עברית", true), RU("ru", "Русский", false);
 
     companion object {
         /** The language for a phone set to [tag] (Android still reports Hebrew as "iw"). */
-        fun forLocale(tag: String): SimpleLanguage = when (tag.substringBefore('-').substringBefore('_').lowercase()) {
+        fun forLocale(tag: String): AppLanguage = when (tag.substringBefore('-').substringBefore('_').lowercase()) {
             "he", "iw" -> HE
             "ru" -> RU
             else -> EN
         }
     }
 }
+
+/** The language the app speaks: the one picked, else the phone's. */
+fun Settings.languageOrDefault(): AppLanguage =
+    language ?: AppLanguage.forLocale(java.util.Locale.getDefault().language)
 
 /** Picture on a Simple Maslul button. */
 @Serializable

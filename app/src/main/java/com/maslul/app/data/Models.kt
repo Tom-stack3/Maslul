@@ -3,6 +3,7 @@ package com.maslul.app.data
 import kotlinx.serialization.Serializable
 import java.time.Instant
 import java.time.ZoneId
+import com.maslul.app.i18n.S
 
 val IsraelZone: ZoneId = ZoneId.of("Asia/Jerusalem")
 
@@ -15,29 +16,7 @@ enum class TransitMode {
 
     val isTransit get() = this != WALK && this != CAR
 
-    /** One vehicle of this mode, as riders say it: "train is close". */
-    val vehicle: String
-        get() = when (this) {
-            BUS -> "bus"
-            TRAIN, LIGHT_RAIL, METRO -> "train"
-            CABLE_CAR -> "cable car"
-            FERRY -> "ferry"
-            CAR -> "car"
-            WALK, OTHER -> "ride"
-        }
-
-    /** Several vehicles of this mode: "Next trains". */
-    val vehicles: String
-        get() = when (this) {
-            BUS -> "buses"
-            FERRY -> "ferries"
-            else -> vehicle + "s"
-        }
-
     companion object {
-        /** [vehicles] for a mix of rides: their mode's word when they share one, else "rides". */
-        fun vehiclesOf(rides: List<Leg>): String = rides.map { it.mode }.distinct().singleOrNull()?.vehicles ?: "rides"
-
         /** Maps a MOTIS mode string to the modes that exist in Israel. */
         fun fromMotis(mode: String?): TransitMode = when (mode) {
             "WALK" -> WALK
@@ -84,8 +63,9 @@ data class Place(
     val tripId: String? = null,
 ) {
     val point get() = GeoPoint(lat, lon)
-    /** Identity used to dedupe suggestions and recents. */
-    val key get() = "${name.trim()}|${"%.4f".format(lat)}|${"%.4f".format(lon)}"
+    /** Identity used to dedupe suggestions and recents; "where I am" is the same place in any language. */
+    val key get() = if (kind == PlaceKind.CURRENT_LOCATION) "current-location"
+        else "${name.trim()}|${"%.4f".format(lat)}|${"%.4f".format(lon)}"
 }
 
 data class StopCall(
@@ -103,8 +83,7 @@ data class StopCall(
     val point get() = GeoPoint(lat, lon)
     /** "Platform 13", "Platform 5, floor 6" — where to stand at a big station. */
     val platformLabel: String?
-        get() = listOfNotNull(track?.let { "Platform $it" }, floor?.let { if (track != null) "floor $it" else "Floor $it" })
-            .joinToString(", ").ifEmpty { null }
+        get() = if (track == null && floor == null) null else S.platform(track, floor)
     val scheduledTime: Instant? get() = scheduledDeparture ?: scheduledArrival
 }
 
@@ -147,8 +126,8 @@ data class Leg(
     val lineLabel: String
         get() = routeShortName?.takeIf { it.isNotBlank() && it != "NaN" }
             ?: when (mode) {
-                TransitMode.TRAIN -> "Train"
-                TransitMode.CABLE_CAR -> "Cable"
+                TransitMode.TRAIN -> S.mode(TransitMode.TRAIN)
+                TransitMode.CABLE_CAR -> S.cableShort
                 else -> "—"
             }
     /** GTFS route_id == SIRI LineRef. */
@@ -211,7 +190,7 @@ data class LineRoute(
     val destination: String get() = LongName.parse(longName).second
     val label: String
         get() = shortName.takeIf { it.isNotBlank() && it != "NaN" }
-            ?: if (mode == TransitMode.TRAIN) "Train" else "—"
+            ?: if (mode == TransitMode.TRAIN) S.mode(TransitMode.TRAIN) else "—"
 }
 
 /** A line groups all its directions/alternatives (same operator + mkt). */

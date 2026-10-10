@@ -1,4 +1,5 @@
 package com.maslul.app.data
+import com.maslul.app.i18n.S
 
 /**
  * House-number queries ("המגינים 14 פתח תקווה"). OSM often lacks the exact number, and then
@@ -61,7 +62,7 @@ object AddressSearch {
         val street = candidates.firstOrNull { isStreet(q, it) } ?: return null
         val approx = street.copy(
             name = "${street.name} $num",
-            subtitle = listOfNotNull("Street · no. $num not on the map", street.subtitle).joinToString(" · "),
+            subtitle = listOfNotNull(S.numberNotOnMap(num), street.subtitle).joinToString(" · "),
             kind = PlaceKind.ADDRESS,
         )
         return (listOf(approx) + candidates).distinctBy { it.key }

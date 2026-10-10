@@ -80,6 +80,8 @@ import com.maslul.app.ui.Tab
 import com.maslul.app.ui.components.PlaceRow
 import com.maslul.app.ui.components.SectionHeader
 import com.maslul.app.ui.theme.LocalExtra
+import com.maslul.app.i18n.S
+import com.maslul.app.data.AppLanguage
 
 private const val SOURCE_URL = "https://github.com/Tom-stack3/Maslul"
 
@@ -88,7 +90,7 @@ class SettingsModel(nav: AppNav) : ScreenModel(nav) {
 
     fun addFavorite() {
         nav.push(
-            SearchModel(nav, null, null, SearchField.TO, single = true, title = "Add favorite") { p, _ ->
+            SearchModel(nav, null, null, SearchField.TO, single = true, title = S.addFavorite) { p, _ ->
                 nav.pop()
                 favoriteDraft = FavoriteDraft.of(store, p)
             },
@@ -97,7 +99,7 @@ class SettingsModel(nav: AppNav) : ScreenModel(nav) {
 
     fun pick(isHome: Boolean) {
         nav.push(
-            SearchModel(nav, null, null, SearchField.TO, single = true, title = if (isHome) "Set home" else "Set work") { p, _ ->
+            SearchModel(nav, null, null, SearchField.TO, single = true, title = if (isHome) S.setHome else S.setWork) { p, _ ->
                 if (isHome) store.setHome(p) else store.setWork(p)
                 nav.pop()
             },
@@ -115,90 +117,103 @@ fun SettingsScreen(model: SettingsModel) {
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(Modifier.statusBarsPadding().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
-            Text("Settings", style = MaterialTheme.typography.titleLarge)
+            IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, S.back) }
+            Text(S.settings, style = MaterialTheme.typography.titleLarge)
         }
         Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding()) {
-            SectionHeader("Places")
-            PlaceRow("Home", data.home?.name ?: "Not set", icon = Icons.Rounded.Home,
-                trailing = { if (data.home != null) IconButton(onClick = { model.store.setHome(null) }) { Icon(Icons.Rounded.Close, "Clear") } },
+            SectionHeader(S.places)
+            PlaceRow(S.home, data.home?.name ?: S.notSet, icon = Icons.Rounded.Home,
+                trailing = { if (data.home != null) IconButton(onClick = { model.store.setHome(null) }) { Icon(Icons.Rounded.Close, S.clear) } },
                 onClick = { model.pick(true) })
-            PlaceRow("Work", data.work?.name ?: "Not set", icon = Icons.Rounded.Work,
-                trailing = { if (data.work != null) IconButton(onClick = { model.store.setWork(null) }) { Icon(Icons.Rounded.Close, "Clear") } },
+            PlaceRow(S.work, data.work?.name ?: S.notSet, icon = Icons.Rounded.Work,
+                trailing = { if (data.work != null) IconButton(onClick = { model.store.setWork(null) }) { Icon(Icons.Rounded.Close, S.clear) } },
                 onClick = { model.pick(false) })
 
-            SectionHeader("Favorite places")
+            SectionHeader(S.favoritePlaces)
             data.favoritePlaces.forEachIndexed { i, f ->
                 PlaceRow(f.label, f.place.name, icon = f.icon.vector(), iconTint = MaterialTheme.colorScheme.primary,
                     trailing = {
                         Row {
                             IconButton(onClick = { model.store.moveFavorite(f.key, -1) }, enabled = i > 0) {
-                                Icon(Icons.Rounded.KeyboardArrowUp, "Move up")
+                                Icon(Icons.Rounded.KeyboardArrowUp, S.moveUp)
                             }
                             IconButton(onClick = { model.store.moveFavorite(f.key, 1) }, enabled = i < data.favoritePlaces.lastIndex) {
-                                Icon(Icons.Rounded.KeyboardArrowDown, "Move down")
+                                Icon(Icons.Rounded.KeyboardArrowDown, S.moveDown)
                             }
                         }
                     },
                     onClick = { model.favoriteDraft = FavoriteDraft(f.place, f) })
             }
-            PlaceRow("Add favorite place", "Tap a favorite above to edit or remove it",
+            PlaceRow(S.addFavoritePlace, S.favoritesHint,
                 icon = Icons.Rounded.Add, iconTint = MaterialTheme.colorScheme.primary, onClick = model::addFavorite)
 
-            SectionHeader("Appearance")
+            SectionHeader(S.language)
+            val chosen = s.language
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 20.dp).testTag("language")) {
+                val choices = listOf<AppLanguage?>(null) + AppLanguage.entries
+                choices.forEachIndexed { i, l ->
+                    SegmentedButton(
+                        selected = chosen == l,
+                        onClick = { model.store.updateSettings { it.copy(language = l) } },
+                        shape = SegmentedButtonDefaults.itemShape(i, choices.size),
+                        modifier = Modifier.testTag("lang_${l?.code ?: "phone"}"),
+                    ) { Text(l?.label ?: S.phoneLanguage, maxLines = 1) }
+                }
+            }
+
+            SectionHeader(S.appearance)
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
                 ThemeMode.entries.forEachIndexed { i, t ->
                     SegmentedButton(
                         selected = s.theme == t,
                         onClick = { model.store.updateSettings { it.copy(theme = t) } },
                         shape = SegmentedButtonDefaults.itemShape(i, ThemeMode.entries.size),
-                    ) { Text(t.name.lowercase().replaceFirstChar(Char::uppercase)) }
+                    ) { Text(S.theme(t)) }
                 }
             }
 
-            SectionHeader("Departure reminders")
-            Text("Notify me this long before I need to leave",
+            SectionHeader(S.departureReminders)
+            Text(S.remindersHint,
                 style = MaterialTheme.typography.bodyMedium, color = LocalExtra.current.subtle,
                 modifier = Modifier.padding(horizontal = 20.dp))
             Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(2, 5, 10, 15).forEach { m ->
                     FilterChip(selected = s.reminderMinutes == m, onClick = { model.store.updateSettings { it.copy(reminderMinutes = m) } },
-                        label = { Text("$m min") })
+                        label = { Text(S.min(m.toLong())) })
                 }
             }
 
-            SectionHeader("Simple Maslul")
+            SectionHeader(S.simpleMaslul)
             SettingSwitch(
-                "Simple Maslul",
-                "Big buttons for a few places and plain step-by-step directions, in English, Hebrew or Russian. " +
-                    "Good for grandparents.",
+                S.simpleMaslul,
+                S.simpleMaslulHint,
                 s.simpleMode, Modifier.testTag("simple_switch"),
             ) { c -> if (c) confirmSimple = true }
 
-            SectionHeader("Advanced")
+            SectionHeader(S.advanced)
             SettingSwitch(
-                "Getting a ride (טרמפ)",
-                "Find the best place to be dropped off and go on by bus or train",
+                S.ridesSetting,
+                S.ridesSettingHint,
                 s.rides, Modifier.testTag("rides_switch"),
             ) { c -> model.store.updateSettings { it.copy(rides = c) } }
             SettingSwitch(
-                "Already on a bus",
-                "Plan the rest of the trip from the bus or train you're on",
+                S.onBoardSetting,
+                S.onBoardSettingHint,
                 s.onBoard, Modifier.testTag("on_board_switch"),
             ) { c -> model.store.updateSettings { it.copy(onBoard = c) } }
             PlaceRow(
-                "My shuttles",
+                S.myShuttles,
                 when (val n = data.shuttles.size) {
-                    0 -> "Company or private shuttles with a fixed timetable"
+                    0 -> S.myShuttlesHint
                     1 -> data.shuttles.first().name
-                    else -> "$n shuttles"
+                    else -> S.nShuttles(n)
                 },
                 icon = Icons.Rounded.DirectionsBus,
                 iconTint = MaterialTheme.colorScheme.primary,
                 onClick = { model.nav.push(ShuttlesModel(model.nav)) },
             )
 
-            SectionHeader("About")
+            SectionHeader(S.about)
             Row(
                 Modifier.fillMaxWidth()
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
@@ -216,18 +231,12 @@ fun SettingsScreen(model: SettingsModel) {
                 }
                 Spacer(Modifier.width(12.dp))
                 Column {
-                    Text("Maslul", style = MaterialTheme.typography.titleMedium)
-                    Text("Version ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall, color = LocalExtra.current.subtle)
+                    Text(S.appName, style = MaterialTheme.typography.titleMedium)
+                    Text(S.version(BuildConfig.VERSION_NAME), style = MaterialTheme.typography.bodySmall, color = LocalExtra.current.subtle)
                 }
             }
             Text(
-                "Maslul is a free, open-source transit app for Israel, licensed under the GNU AGPL v3.\n\n" +
-                    "• Routes & timetables: Israel Ministry of Transport GTFS, routed by Transitous (transitous.org).\n" +
-                    "• Live vehicles: Ministry of Transport SIRI feed, published by Open Bus / The Public Knowledge Workshop (Hasadna).\n" +
-                    "• Line search & daily schedules: Open Bus Stride API.\n" +
-                    "• Search: Transitous, Photon (komoot) and Nominatim, OpenStreetMap data.\n" +
-                    "• Maps: OpenFreeMap, © OpenStreetMap contributors.\n\n" +
-                    "Live arrival times are estimated from each vehicle's reported position and are typically 30–90 s behind real time.",
+                S.aboutText,
                 style = MaterialTheme.typography.bodyMedium,
                 color = LocalExtra.current.subtle,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
@@ -236,10 +245,10 @@ fun SettingsScreen(model: SettingsModel) {
             TextButton(onClick = { uri.openUri(SOURCE_URL) }, modifier = Modifier.padding(horizontal = 8.dp)) {
                 Icon(Icons.Rounded.Code, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Source code on GitHub")
+                Text(S.sourceCode)
             }
             Text(
-                "Made with ♥ by Tommy and contributors",
+                S.madeBy,
                 style = MaterialTheme.typography.bodySmall,
                 color = LocalExtra.current.subtle,
                 modifier = Modifier
@@ -255,19 +264,16 @@ fun SettingsScreen(model: SettingsModel) {
     if (confirmSimple) {
         AlertDialog(
             onDismissRequest = { confirmSimple = false },
-            title = { Text("Switch to Simple Maslul?") },
-            text = {
-                Text("Maslul becomes six big buttons and plain step-by-step directions, without maps, lines or stations. " +
-                    "To come back, open Settings in Simple Maslul and choose \"Switch to full Maslul\".")
-            },
+            title = { Text(S.switchToSimpleQ) },
+            text = { Text(S.switchToSimpleBody) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmSimple = false
                     model.store.updateSettings { it.copy(simpleMode = true) }
                     model.nav.selectTab(Tab.SIMPLE)
-                }, modifier = Modifier.testTag("simple_confirm")) { Text("Switch") }
+                }, modifier = Modifier.testTag("simple_confirm")) { Text(S.switchAction) }
             },
-            dismissButton = { TextButton(onClick = { confirmSimple = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { confirmSimple = false }) { Text(S.cancel) } },
         )
     }
 }

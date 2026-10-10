@@ -9,7 +9,9 @@ import com.maslul.app.data.TransitMode
 import com.maslul.app.data.TransitRepository
 import com.maslul.app.data.TransitousApi
 import com.maslul.app.data.TripIds
+import com.maslul.app.data.AppJson
 import com.maslul.app.data.cleanHeadsign
+import com.maslul.app.data.headsignOf
 import com.maslul.app.data.forTrip
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -89,6 +91,22 @@ class ParsingTest {
         assertEquals("אוניברסיטת ת\"א, תל אביב יפו", cleanHeadsign("תל אביב יפו_אוניברסיטת ת\"א"))
         assertEquals("ת. מרכזית ירושלים", cleanHeadsign("ירושלים_ת. מרכזית ירושלים"))
         assertEquals("Haifa", cleanHeadsign("Haifa"))
+    }
+
+    @Test
+    fun trainsGoWhereTheirTripEndsNotByNumber() {
+        // Israel Railways' headsign is the train number.
+        assertEquals("נהריה", headsignOf("108", "נהריה"))
+        assertEquals("108", headsignOf("108", null))
+        assertEquals("גרנד קניון, חיפה", headsignOf("חיפה_גרנד קניון", "גרנד קניון/שמחה גולן"))
+    }
+
+    @Test
+    fun readsATrainsDestinationFromThePlan() {
+        val json = """{"mode":"REGIONAL_RAIL","from":{"name":"A","lat":31.7,"lon":35.2},"to":{"name":"B","lat":32.1,"lon":34.8},
+            "startTime":"2026-10-12T06:09:00Z","endTime":"2026-10-12T06:55:00Z","headsign":"726","tripTo":{"name":"הרצליה","lat":32.16,"lon":34.8},
+            "routeShortName":"","routeType":2,"tripId":"t"}"""
+        assertEquals("הרצליה", AppJson.decodeFromString(com.maslul.app.data.LegDto.serializer(), json).toDomain().headsign)
     }
 
     @Test

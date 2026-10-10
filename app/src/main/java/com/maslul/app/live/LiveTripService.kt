@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.time.Instant
+import com.maslul.app.i18n.S
 
 /** The trip being guided, shared with the UI (same process). */
 object ActiveTrip {
@@ -50,7 +51,7 @@ class LiveTripService : LifecycleService() {
         val session = ActiveTrip.session.value ?: run { stopSelf(); return START_NOT_STICKY }
         Notifs.ensureChannels(this)
         ServiceCompat.startForeground(
-            this, NOTIF_ID, ongoing("Starting live directions…", session.destination, 0f),
+            this, NOTIF_ID, ongoing(S.startingLiveDirections, session.destination, 0f),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
         )
         fired.clear()
@@ -107,7 +108,7 @@ class LiveTripService : LifecycleService() {
             .setSilent(true)
             .setProgress(100, (progress * 100).toInt(), false)
             .setContentIntent(Notifs.openAppIntent(this))
-            .addAction(0, "End trip", stopPi)
+            .addAction(0, S.endTrip, stopPi)
             .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
             .build()
     }

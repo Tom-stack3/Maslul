@@ -52,7 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.maslul.app.data.SimpleButton
 import com.maslul.app.data.SimpleIcon
-import com.maslul.app.data.SimpleLanguage
+import com.maslul.app.data.AppLanguage
+import com.maslul.app.data.languageOrDefault
 import com.maslul.app.data.simpleSlots
 import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
@@ -86,7 +87,7 @@ class SimpleSettingsModel(nav: AppNav) : ScreenModel(nav) {
         draft = null
     }
 
-    fun setLanguage(l: SimpleLanguage) = store.updateSettings { it.copy(simpleLanguage = l) }
+    fun setLanguage(l: AppLanguage) = store.updateSettings { it.copy(language = l) }
 
     fun fullApp() {
         store.updateSettings { it.copy(simpleMode = false) }
@@ -98,7 +99,7 @@ class SimpleSettingsModel(nav: AppNav) : ScreenModel(nav) {
 fun SimpleSettingsScreen(model: SimpleSettingsModel) = SimpleFrame {
     val s = LocalSimpleStrings.current
     val data by model.store.data.collectAsState()
-    val lang = data.settings.simpleLanguageOrDefault()
+    val lang = data.settings.languageOrDefault()
     var confirmFull by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
@@ -106,7 +107,7 @@ fun SimpleSettingsScreen(model: SimpleSettingsModel) = SimpleFrame {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp).navigationBarsPadding()) {
             Header(s.language)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SimpleLanguage.entries.forEach { l ->
+                AppLanguage.entries.forEach { l ->
                     val on = l == lang
                     Surface(
                         onClick = { model.setLanguage(l) },

@@ -34,13 +34,16 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.maslul.app.data.Place
 import com.maslul.app.data.PlaceKind
@@ -86,8 +89,9 @@ import com.maslul.app.ui.simple.SimpleSettingsModel
 import com.maslul.app.ui.simple.SimpleSettingsScreen
 import com.maslul.app.ui.simple.SimpleTripModel
 import com.maslul.app.ui.simple.SimpleTripScreen
-import com.maslul.app.ui.simple.simpleLanguageOrDefault
+import com.maslul.app.data.languageOrDefault
 import com.maslul.app.ui.theme.MaslulTheme
+import com.maslul.app.i18n.S
 
 class MainActivity : ComponentActivity() {
     private val nav: AppNav by viewModels()
@@ -95,17 +99,20 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // Following the phone's language: it may have changed since the app started (the activity is recreated then).
+        MaslulApp.instance.applyLanguage()
         setContent {
             val data by MaslulApp.instance.store.data.collectAsState()
             val simple = data.settings.simpleMode
-            val simpleLanguage = data.settings.simpleLanguageOrDefault()
-            LaunchedEffect(simple, simpleLanguage) {
-                // Simple Maslul asks for stop and line names in its language; the full app keeps the feed's.
-                MaslulApp.instance.repo.language = if (simple) simpleLanguage.code else null
+            val language = data.settings.languageOrDefault()
+            LaunchedEffect(simple) {
                 if (simple != (nav.tab == Tab.SIMPLE)) nav.selectTab(if (simple) Tab.SIMPLE else Tab.NAVIGATE)
             }
             MaslulTheme(data.settings.theme) {
-                AppShell(nav)
+                // Hebrew reads right to left, the whole app with it.
+                CompositionLocalProvider(LocalLayoutDirection provides if (language.rtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+                    AppShell(nav)
+                }
             }
         }
     }
@@ -144,7 +151,7 @@ fun AppShell(nav: AppNav) {
                     Surface(
                         onClick = {
                             val legs = s.itinerary.legs
-                            val from = legs.first().from.let { Place(it.name.ifBlank { "Start" }, it.lat, it.lon, kind = PlaceKind.PIN) }
+                            val from = legs.first().from.let { Place(it.name.ifBlank { S.start }, it.lat, it.lon, kind = PlaceKind.PIN) }
                             val to = legs.last().to.let { Place(s.destination, it.lat, it.lon, kind = PlaceKind.PIN) }
                             nav.push(RouteDetailModel(nav, s.itinerary, from, to))
                         },
@@ -157,7 +164,7 @@ fun AppShell(nav: AppNav) {
                             Icon(Icons.Rounded.Navigation, null, tint = MaterialTheme.colorScheme.onPrimary)
                             Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(s.state?.title ?: "Live directions", style = MaterialTheme.typography.titleSmall,
+                                Text(s.state?.title ?: S.liveDirections, style = MaterialTheme.typography.titleSmall,
                                     color = MaterialTheme.colorScheme.onPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(s.state?.text ?: s.destination, style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f), maxLines = 1,
@@ -174,21 +181,21 @@ fun AppShell(nav: AppNav) {
                     selected = nav.tab == Tab.NAVIGATE,
                     onClick = { nav.selectTab(Tab.NAVIGATE) },
                     icon = { Icon(Icons.Rounded.Directions, null) },
-                    label = { Text("Navigate") },
+                    label = { Text(S.tabNavigate) },
                     modifier = Modifier.testTag("tab_navigate"),
                 )
                 NavigationBarItem(
                     selected = nav.tab == Tab.LINES,
                     onClick = { nav.selectTab(Tab.LINES) },
                     icon = { Icon(Icons.Rounded.Timeline, null) },
-                    label = { Text("Lines") },
+                    label = { Text(S.tabLines) },
                     modifier = Modifier.testTag("tab_lines"),
                 )
                 NavigationBarItem(
                     selected = nav.tab == Tab.STATIONS,
                     onClick = { nav.selectTab(Tab.STATIONS) },
                     icon = { Icon(Icons.Rounded.Place, null) },
-                    label = { Text("Stations") },
+                    label = { Text(S.tabStations) },
                     modifier = Modifier.testTag("tab_stations"),
                 )
             }

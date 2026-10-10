@@ -44,6 +44,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.maslul.app.i18n.S
 
 /** The Stations tab: find a stop or station, and your favourite and nearby ones. */
 class StationsHomeModel(nav: AppNav) : ScreenModel(nav) {
@@ -67,7 +68,7 @@ class StationsHomeModel(nav: AppNav) : ScreenModel(nav) {
                 .onSuccess { results = it }
                 .onFailure {
                     if (it is CancellationException) throw it
-                    error = "Couldn't search stations. Check your connection."
+                    error = S.errSearchStations
                     results = emptyList()
                 }
             loading = false
@@ -95,30 +96,30 @@ fun StationsHomeScreen(model: StationsHomeModel) {
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(Modifier.background(MaterialTheme.colorScheme.surface).statusBarsPadding().padding(bottom = 10.dp)) {
-            Text("Stations", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 10.dp))
-            SearchBox(model.query, model::onQuery, "Stop or station name", Modifier.testTag("station_search"))
+            Text(S.tabStations, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 10.dp))
+            SearchBox(model.query, model::onQuery, S.stationSearchHint, Modifier.testTag("station_search"))
         }
         if (model.loading) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp)) else Spacer(Modifier.height(2.dp))
 
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
             if (model.query.isNotBlank()) {
-                if (model.error != null) item { MessageBox("Something went wrong", body = model.error) }
+                if (model.error != null) item { MessageBox(S.somethingWrong, body = model.error) }
                 else if (!model.loading && model.results.isEmpty()) {
-                    item { MessageBox("No stations found", body = "Search by stop name, station or stop number.") }
+                    item { MessageBox(S.noStationsFound, body = S.noStationsFoundHint) }
                 }
                 items(model.results, key = { "sr-${it.stopId}" }) { p -> StationRow(p, here) { model.openStop(p) } }
             } else {
                 if (data.favoriteStops.isNotEmpty()) {
-                    item { SectionHeader("Favorite stops") }
+                    item { SectionHeader(S.favoriteStops) }
                     items(data.favoriteStops, key = { "fs-${it.stopId}" }) { p ->
                         PlaceRow(p.name, p.subtitle, icon = Icons.Rounded.Star, iconTint = ModeColors.Bus) { model.openStop(p) }
                     }
                 }
-                item { SectionHeader("Nearby stations", action = "Refresh", onAction = model::loadNearby) }
+                item { SectionHeader(S.nearbyStations, action = S.refresh, onAction = model::loadNearby) }
                 if (model.nearby.isEmpty()) {
                     item {
                         if (model.nearbyLoading) LoadingBox()
-                        else MessageBox("No stops nearby", body = "Allow location access to see stations around you.", icon = Icons.Rounded.NearMe)
+                        else MessageBox(S.noStopsNearby, body = S.noStopsNearbyHint, icon = Icons.Rounded.NearMe)
                     }
                 }
                 items(model.nearby, key = { "nb-${it.stopId}" }) { p -> StationRow(p, here) { model.openStop(p) } }

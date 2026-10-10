@@ -111,6 +111,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
+import com.maslul.app.i18n.S
 
 class LineModel(nav: AppNav, route: LineRoute) : ScreenModel(nav) {
     var route by mutableStateOf(route)
@@ -144,8 +145,7 @@ class LineModel(nav: AppNav, route: LineRoute) : ScreenModel(nav) {
             runCatching { repo.lineDetail(current) }
                 .onSuccess { detail = it; refreshLive() }
                 .onFailure {
-                    error = (it as? LineUnavailableException)?.message
-                        ?: "Couldn't load this line. Check your connection and try again."
+                    error = if (it is LineUnavailableException) S.errLineUnavailable else S.errLoadLine
                 }
             v.await()?.let { variants = it }
             loading = false
@@ -214,31 +214,31 @@ fun LineScreen(model: LineModel) {
         Surface(color = MaterialTheme.colorScheme.surface) {
             Column(Modifier.statusBarsPadding()) {
                 Row(Modifier.padding(start = 4.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+                    IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, S.back) }
                     LineBadge(r.label, r.mode, color = color, large = true)
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("to ${r.destination.ifBlank { r.longName }}", style = MaterialTheme.typography.titleSmall,
+                        Text(S.toHeadsign(r.destination.ifBlank { r.longName }), style = MaterialTheme.typography.titleSmall,
                             maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text("${r.agency} · from ${r.origin}", style = MaterialTheme.typography.bodySmall,
+                        Text("${r.agency} · " + S.fromOrigin(r.origin), style = MaterialTheme.typography.bodySmall,
                             color = LocalExtra.current.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     IconButton(onClick = model::toggleFavorite) {
-                        Icon(if (fav) Icons.Rounded.Star else Icons.Rounded.StarBorder, "Favorite",
+                        Icon(if (fav) Icons.Rounded.Star else Icons.Rounded.StarBorder, S.favorite,
                             tint = if (fav) Color(0xFFF5A524) else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Box {
                         IconButton(
                             onClick = { if (model.variants.size > 2) menu = true else model.reverse() },
                             enabled = model.variants.size > 1,
-                        ) { Icon(Icons.Rounded.SwapHoriz, "Change direction") }
+                        ) { Icon(Icons.Rounded.SwapHoriz, S.changeDirection) }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                             model.variants.forEach { v ->
                                 DropdownMenuItem(
                                     text = {
                                         Column {
-                                            Text("to ${v.destination}", style = MaterialTheme.typography.bodyMedium)
-                                            Text("from ${v.origin}", style = MaterialTheme.typography.bodySmall, color = LocalExtra.current.subtle)
+                                            Text(S.toHeadsign(v.destination), style = MaterialTheme.typography.bodyMedium)
+                                            Text(S.fromOrigin(v.origin), style = MaterialTheme.typography.bodySmall, color = LocalExtra.current.subtle)
                                         }
                                     },
                                     onClick = { menu = false; model.select(v) },
@@ -252,8 +252,8 @@ fun LineScreen(model: LineModel) {
 
         val d = model.detail
         when {
-            d == null && model.loading -> LoadingBox(text = "Loading line…")
-            d == null -> MessageBox("Line unavailable", body = model.error, action = "Retry", onAction = model::retry)
+            d == null && model.loading -> LoadingBox(text = S.loadingLine)
+            d == null -> MessageBox(S.lineUnavailable, body = model.error, action = S.retry, onAction = model::retry)
             else -> LineBody(model, d, color, now)
         }
     }
@@ -285,8 +285,8 @@ private fun LineBody(model: LineModel, d: LineDetail, color: Color, now: Instant
                 Column(Modifier.fillMaxSize()) {
                     PrimaryTabRow(selectedTabIndex = model.tab, containerColor = MaterialTheme.colorScheme.surface) {
                         val off = MaterialTheme.colorScheme.onSurfaceVariant
-                        Tab(model.tab == 0, onClick = { model.tab = 0 }, text = { Text("Stops") }, unselectedContentColor = off)
-                        Tab(model.tab == 1, onClick = { model.tab = 1 }, text = { Text("Timetable") }, unselectedContentColor = off)
+                        Tab(model.tab == 0, onClick = { model.tab = 0 }, text = { Text(S.stops) }, unselectedContentColor = off)
+                        Tab(model.tab == 1, onClick = { model.tab = 1 }, text = { Text(S.timetableWord) }, unselectedContentColor = off)
                     }
                     if (model.tab == 0) StopsList(model, d, color, now) else Timetable(model, d, now)
                 }
@@ -297,12 +297,12 @@ private fun LineBody(model: LineModel, d: LineDetail, color: Color, now: Instant
                 FilledTonalIconButton(
                     onClick = { scope.launch { if (mapOnly) sheet.partialExpand() else sheet.hide() } },
                     modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).testTag("line_map_expand"),
-                ) { Icon(if (mapOnly) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen, if (mapOnly) "Show stops" else "Expand map") }
+                ) { Icon(if (mapOnly) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen, if (mapOnly) S.showStops else S.expandMap) }
                 if (mapOnly) {
                     ExtendedFloatingActionButton(
                         onClick = { scope.launch { sheet.partialExpand() } },
                         icon = { Icon(Icons.Rounded.ExpandLess, null) },
-                        text = { Text(if (model.tab == 0) "Stops" else "Timetable") },
+                        text = { Text(if (model.tab == 0) S.stops else S.timetableWord) },
                         containerColor = MaterialTheme.colorScheme.surface,
                         modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp),
                     )
@@ -338,7 +338,7 @@ private fun LineMap(model: LineModel, d: LineDetail, color: Color, now: Instant,
         )
         if (followed != null) {
             LiveLocationCard(
-                "${d.route.label} live location" + (followed.ride?.let { " · left ${Fmt.time(it.departure)}" } ?: ""),
+                S.liveLocationOf(d.route.label) + (followed.ride?.let { " · " + S.leftAt(Fmt.time(it.departure)) } ?: ""),
                 followed.vehicle.recordedAt,
                 Modifier.padding(horizontal = 60.dp, vertical = 8.dp).align(Alignment.TopCenter),
                 onClose = { model.following = null },
@@ -388,7 +388,7 @@ private fun StopsList(model: LineModel, d: LineDetail, color: Color, now: Instan
                                     style = MaterialTheme.typography.titleSmall,
                                     onClick = if (next.live) ({ model.follow(next.journeyRef) }) else null,
                                 )
-                                if (!next.live) Text("scheduled", style = MaterialTheme.typography.labelSmall, color = x.subtle)
+                                if (!next.live) Text(S.scheduledLower, style = MaterialTheme.typography.labelSmall, color = x.subtle)
                             }
                         }
                     }
@@ -401,17 +401,17 @@ private fun StopsList(model: LineModel, d: LineDetail, color: Color, now: Instan
                                         (if (a.live) "● " else "") + Fmt.time(a.time),
                                         if (a.live) freshnessColor(f) else x.subtle,
                                         modifier = if (a.live) {
-                                            Modifier.clip(RoundedCornerShape(50)).clickable(onClickLabel = "Show on map") { model.follow(a.journeyRef) }
+                                            Modifier.clip(RoundedCornerShape(50)).clickable(onClickLabel = S.showOnMap) { model.follow(a.journeyRef) }
                                         } else {
                                             Modifier
                                         },
                                     )
                                 }
-                                if (arrivals.isEmpty()) Text("No more trips today", style = MaterialTheme.typography.bodySmall, color = x.subtle)
+                                if (arrivals.isEmpty()) Text(S.noMoreTripsToday, style = MaterialTheme.typography.bodySmall, color = x.subtle)
                             }
                             TextButton(onClick = {
-                                model.openStop(s) { Toast.makeText(ctx, "Stop board unavailable", Toast.LENGTH_SHORT).show() }
-                            }, contentPadding = PaddingValues(0.dp)) { Text("All departures from this stop") }
+                                model.openStop(s) { Toast.makeText(ctx, S.stopBoardUnavailable, Toast.LENGTH_SHORT).show() }
+                            }, contentPadding = PaddingValues(0.dp)) { Text(S.allDeparturesFromStop) }
                         }
                     }
                 }
@@ -431,7 +431,7 @@ private fun FlowRow2(content: @Composable () -> Unit) {
 private fun VehicleRow(v: LineVehicle, rail: RailSpec, color: Color, label: String, mode: TransitMode, now: Instant, onClick: () -> Unit) {
     val x = LocalExtra.current
     TimelineRow(rail, rail, Node.VEHICLE, color, timeWidth = 12.dp, nodeY = 18.dp,
-        modifier = Modifier.clickable(onClickLabel = "Show on map", onClick = onClick)) {
+        modifier = Modifier.clickable(onClickLabel = S.showOnMap, onClick = onClick)) {
         Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(
                 Modifier.clip(RoundedCornerShape(10.dp)).background(color.copy(alpha = 0.12f)).padding(horizontal = 8.dp, vertical = 4.dp),
@@ -448,7 +448,7 @@ private fun VehicleRow(v: LineVehicle, rail: RailSpec, color: Color, label: Stri
             LiveSignal(f, size = 12.dp)
             if (f == Freshness.STALE) {
                 Spacer(Modifier.width(4.dp))
-                Text("last seen ${Fmt.time(v.vehicle.recordedAt)}", style = MaterialTheme.typography.labelSmall, color = x.stale)
+                Text(S.lastSeen(Fmt.time(v.vehicle.recordedAt)), style = MaterialTheme.typography.labelSmall, color = x.stale)
             }
         }
     }
@@ -468,11 +468,11 @@ private fun Timetable(model: LineModel, d: LineDetail, now: Instant) {
     LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(16.dp)) {
         item {
             Text(
-                "Departures from ${d.stops.first().name} · ${Fmt.day(date)}",
+                S.departuresFrom(d.stops.first().name) + " · " + Fmt.day(date),
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.padding(bottom = 12.dp),
             )
-            if (d.rides.isEmpty()) MessageBox("No departures listed for today")
+            if (d.rides.isEmpty()) MessageBox(S.noDeparturesToday)
         }
         byHour.forEach { (hour, rides) ->
             item(key = "h$hour") {

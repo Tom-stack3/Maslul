@@ -12,6 +12,13 @@ sealed interface RideOffer {
 
     companion object {
         val MINUTES = listOf(5, 10, 15, 20, 30, 45)
+
+        /**
+         * How a lift [Within] a drive reaches the first stop: driven right to it. MOTIS's
+         * "CAR_DROPOFF" mixes driving and walking freely: it can drop you off a few meters along, or
+         * walk you across a stretch no car can use and put you back in a car on the other side.
+         */
+        const val WITHIN_MODES = "CAR"
     }
 }
 

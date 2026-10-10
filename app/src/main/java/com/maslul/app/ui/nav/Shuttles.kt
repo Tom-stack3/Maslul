@@ -57,6 +57,7 @@ import com.maslul.app.ui.theme.LocalExtra
 import com.maslul.app.ui.theme.Numeric
 import java.time.DayOfWeek
 import java.util.UUID
+import com.maslul.app.i18n.S
 
 class ShuttlesModel(nav: AppNav) : ScreenModel(nav) {
     fun add() = nav.push(ShuttleEditModel(nav, null))
@@ -69,13 +70,12 @@ fun ShuttlesScreen(model: ShuttlesModel) {
     val x = LocalExtra.current
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(Modifier.statusBarsPadding().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
-            Text("My shuttles", style = MaterialTheme.typography.titleLarge)
+            IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, S.back) }
+            Text(S.myShuttles, style = MaterialTheme.typography.titleLarge)
         }
         Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding()) {
             Text(
-                "Add a shuttle that runs on a fixed timetable, like your company's bus to the train station. " +
-                    "Trip planning then offers it on its own or combined with buses and trains.",
+                S.shuttlesIntro,
                 style = MaterialTheme.typography.bodyMedium, color = x.subtle,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
             )
@@ -89,7 +89,7 @@ fun ShuttlesScreen(model: ShuttlesModel) {
                     onClick = { model.edit(s) },
                 )
             }
-            PlaceRow("Add shuttle", null, icon = Icons.Rounded.Add, iconTint = MaterialTheme.colorScheme.primary,
+            PlaceRow(S.addShuttle, null, icon = Icons.Rounded.Add, iconTint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.testTag("add_shuttle"), onClick = model::add)
         }
     }
@@ -121,7 +121,7 @@ class ShuttleEditModel(nav: AppNav, existing: Shuttle?) : ScreenModel(nav) {
 
     fun pick(isFrom: Boolean) {
         nav.push(SearchModel(nav, null, null, SearchField.TO, single = true,
-            title = if (isFrom) "Where the shuttle leaves from" else "Where the shuttle goes") { p: Place, _ ->
+            title = if (isFrom) S.shuttleFromTitle else S.shuttleToTitle) { p: Place, _ ->
             nav.pop()
             if (isFrom) from = p else to = p
         })
@@ -167,28 +167,28 @@ fun ShuttleEditScreen(model: ShuttleEditModel) {
     val x = LocalExtra.current
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).imePadding()) {
         Row(Modifier.statusBarsPadding().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
-            Text(if (model.isNew) "New shuttle" else "Edit shuttle", style = MaterialTheme.typography.titleLarge)
+            IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, S.back) }
+            Text(if (model.isNew) S.newShuttle else S.editShuttle, style = MaterialTheme.typography.titleLarge)
         }
         Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 24.dp)) {
             OutlinedTextField(
                 value = model.name,
                 onValueChange = { model.name = it.take(24) },
-                label = { Text("Name") },
+                label = { Text(S.name) },
                 isError = model.showMissing && model.name.isBlank(),
-                placeholder = { Text("e.g. Office shuttle") },
+                placeholder = { Text(S.shuttleNameExample) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).testTag("shuttle_name"),
             )
             Spacer(Modifier.height(6.dp))
             val err = MaterialTheme.colorScheme.error
-            PlaceRow("From", model.from?.name ?: "Choose where it leaves from", icon = Icons.Rounded.TripOrigin,
+            PlaceRow(S.from, model.from?.name ?: S.chooseShuttleFrom, icon = Icons.Rounded.TripOrigin,
                 iconTint = MaterialTheme.colorScheme.primary,
                 subtitleColor = if (model.showMissing && model.from == null) err else x.subtle) { model.pick(true) }
             // Both ends at one stop: the second one picked is the one to change.
             val sameStop = model.from != null && model.to != null && ShuttleSchedule.isNear(model.from!!.point, model.to!!.point)
-            PlaceRow("To", model.to?.name ?: "Choose where it goes", icon = Icons.Rounded.Flag,
+            PlaceRow(S.to, model.to?.name ?: S.chooseShuttleTo, icon = Icons.Rounded.Flag,
                 iconTint = MaterialTheme.colorScheme.primary,
                 subtitleColor = if (model.showMissing && (model.to == null || sameStop)) err else x.subtle) { model.pick(false) }
             Spacer(Modifier.height(8.dp))
@@ -197,16 +197,16 @@ fun ShuttleEditScreen(model: ShuttleEditModel) {
             OutlinedTextField(
                 value = model.times,
                 onValueChange = { model.times = it },
-                label = { Text("Departure times") },
+                label = { Text(S.departureTimes) },
                 placeholder = { Text("07:30, 08:15, 17:00") },
                 isError = bad,
                 supportingText = {
                     Text(
                         when {
-                            bad && ShuttleSchedule.isEmptyTimes(model.times) -> "Add at least one departure time"
-                            bad -> "Use 24-hour times separated by commas, like 07:30, 17:00"
-                            parsed != null -> "${parsed.size} departure${if (parsed.size > 1) "s" else ""} a day"
-                            else -> "When it leaves from the first stop"
+                            bad && ShuttleSchedule.isEmptyTimes(model.times) -> S.addDepartureTime
+                            bad -> S.timesFormatHint
+                            parsed != null -> S.departuresADay(parsed.size)
+                            else -> S.departureTimesHint
                         },
                     )
                 },
@@ -217,10 +217,10 @@ fun ShuttleEditScreen(model: ShuttleEditModel) {
             val ride = model.rideMinutes
             val rideMissing = ride == null && model.showMissing
             Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Ride takes", style = MaterialTheme.typography.titleSmall,
+                Text(S.rideTakes, style = MaterialTheme.typography.titleSmall,
                     color = if (rideMissing) MaterialTheme.colorScheme.error else Color.Unspecified, modifier = Modifier.weight(1f))
                 Text(
-                    if (ride != null) "$ride min" else "Not set",
+                    if (ride != null) S.min(ride.toLong()) else S.notSet,
                     style = MaterialTheme.typography.bodyMedium.merge(Numeric),
                     color = when {
                         rideMissing -> MaterialTheme.colorScheme.error
@@ -245,12 +245,12 @@ fun ShuttleEditScreen(model: ShuttleEditModel) {
                 modifier = Modifier.padding(horizontal = 20.dp).systemGestureExclusion().testTag("shuttle_ride_slider"),
             )
             if (ride == null) {
-                Text("Slide to set how long it takes from stop to stop",
+                Text(S.rideTakesHint,
                     style = MaterialTheme.typography.bodySmall,
                     color = if (rideMissing) MaterialTheme.colorScheme.error else x.subtle,
                     modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 10.dp))
             }
-            Text("Runs on", style = MaterialTheme.typography.titleSmall,
+            Text(S.runsOn, style = MaterialTheme.typography.titleSmall,
                 color = if (model.showMissing && model.days.isEmpty()) MaterialTheme.colorScheme.error else Color.Unspecified, modifier = Modifier.padding(horizontal = 20.dp))
             Spacer(Modifier.height(6.dp))
             FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -260,7 +260,7 @@ fun ShuttleEditScreen(model: ShuttleEditModel) {
                     FilterChip(
                         selected = on,
                         onClick = { model.days = if (on) model.days - d else model.days + d },
-                        label = { Text(DayOfWeek.of(d).name.take(3).lowercase().replaceFirstChar(Char::uppercase)) },
+                        label = { Text(S.dayShort(DayOfWeek.of(d))) },
                     )
                 }
             }
@@ -275,12 +275,12 @@ fun ShuttleEditScreen(model: ShuttleEditModel) {
                 onClick = model::save,
                 shape = CircleShape,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).height(50.dp).testTag("shuttle_save"),
-            ) { Text("Save") }
+            ) { Text(S.save) }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
-                TextButton(onClick = model::addReturn) { Text("Save and add the way back") }
+                TextButton(onClick = model::addReturn) { Text(S.saveAndAddReturn) }
                 Spacer(Modifier.weight(1f))
                 if (!model.isNew) {
-                    TextButton(onClick = model::delete) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = model::delete) { Text(S.delete, color = MaterialTheme.colorScheme.error) }
                 }
             }
         }

@@ -5,6 +5,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.temporal.ChronoUnit
+import com.maslul.app.i18n.S
 
 /**
  * Client for Transitous (https://transitous.org), a free community-run MOTIS instance that
@@ -72,7 +73,9 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
             .build()
         val dto = Http.getJson<PlanDto>(url)
         return PlanResult(
-            itineraries = dto.itineraries.map { it.toDomain() }.filter { it.legs.any { l -> l.mode.isTransit } },
+            itineraries = dto.itineraries.map { it.toDomain() }
+                // A lift is one drive: a car again after walking would need the car to be waiting there.
+                .filter { it.legs.any { l -> l.mode.isTransit } && it.legs.count { l -> l.mode == TransitMode.CAR } <= 1 },
             walkOnly = dto.direct.firstOrNull { it.legs.all { l -> l.mode == "WALK" } }?.toDomain(),
             nextCursor = dto.nextPageCursor,
             previousCursor = dto.previousPageCursor,
@@ -258,6 +261,8 @@ class LegDto(
     val scheduledEndTime: String? = null,
     val distance: Double? = null,
     val headsign: String? = null,
+    /** Where the trip ends, which for trains is what the headsign (a train number) doesn't say. */
+    val tripTo: PlaceDto? = null,
     val routeId: String? = null,
     val routeColor: String? = null,
     val routeTextColor: String? = null,
@@ -286,7 +291,7 @@ class LegDto(
             // A walk after a car drop-off can come back a few seconds "shorter than nothing".
             end = if (!mode.isTransit && end.isBefore(start)) start else end,
             distanceM = distance ?: if (!mode.isTransit && geometry.size > 1) GeoMath.cumulative(geometry).last() else null,
-            headsign = headsign?.let { cleanHeadsign(it) },
+            headsign = headsign?.let { headsignOf(it, tripTo?.name) },
             routeShortName = routeShortName ?: displayName,
             routeLongName = routeLongName,
             routeColor = TransitousApi.parseColor(routeColor),
@@ -305,23 +310,16 @@ class LegDto(
 
     private fun describeStep(s: StepDto): String {
         val street = s.streetName?.takeIf { it.isNotBlank() }
-        val dir = when (s.relativeDirection) {
-            "LEFT" -> "Turn left"
-            "RIGHT" -> "Turn right"
-            "SLIGHTLY_LEFT" -> "Bear left"
-            "SLIGHTLY_RIGHT" -> "Bear right"
-            "HARD_LEFT" -> "Sharp left"
-            "HARD_RIGHT" -> "Sharp right"
-            "UTURN_LEFT", "UTURN_RIGHT" -> "Make a U-turn"
-            "DEPART" -> "Head out"
-            "ELEVATOR" -> "Take the elevator"
-            "STAIRS" -> "Take the stairs"
-            "CIRCLE_CLOCKWISE", "CIRCLE_COUNTERCLOCKWISE" -> "Take the roundabout"
-            else -> "Continue"
-        }
-        return if (street != null) "$dir on $street" else dir
+        return S.walkStep(s.relativeDirection, street)
     }
 }
+
+/**
+ * Where a ride is heading, as riders read it. Israel Railways puts the train number in the
+ * headsign ("726"), so a train goes by where its trip ends ([tripTo]) instead.
+ */
+fun headsignOf(headsign: String, tripTo: String?): String =
+    if (headsign.isNotBlank() && headsign.all { it.isDigit() } && !tripTo.isNullOrBlank()) tripTo else cleanHeadsign(headsign)
 
 /** MOT headsigns are "City_Destination"; show "Destination, City". */
 fun cleanHeadsign(h: String): String {
@@ -409,6 +407,7 @@ class StopTimeDto(
     val place: PlaceDto = PlaceDto(),
     val mode: String = "BUS",
     val headsign: String = "",
+    val tripTo: PlaceDto? = null,
     val tripId: String = "",
     val routeId: String? = null,
     val routeShortName: String? = null,
@@ -425,13 +424,13 @@ class StopTimeDto(
         val time = call.scheduledDeparture ?: call.scheduledArrival ?: return null
         val mode = TransitMode.fromMotis(mode)
         val label = (routeShortName ?: displayName)?.takeIf { it.isNotBlank() && it != "NaN" }
-            ?: if (mode == TransitMode.TRAIN) "Train" else "—"
+            ?: if (mode == TransitMode.TRAIN) S.mode(TransitMode.TRAIN) else "—"
         return Departure(
             tripId = tripId,
             routeId = routeId,
             mode = mode,
             lineLabel = label,
-            headsign = cleanHeadsign(headsign),
+            headsign = headsignOf(headsign, tripTo?.name),
             agency = agencyName,
             routeColor = TransitousApi.parseColor(routeColor),
             scheduled = time,

@@ -8,7 +8,7 @@ import com.maslul.app.data.Place
 import com.maslul.app.data.PlaceKind
 import com.maslul.app.data.SimpleButton
 import com.maslul.app.data.SimpleIcon
-import com.maslul.app.data.SimpleLanguage
+import com.maslul.app.data.AppLanguage
 import com.maslul.app.data.StopCall
 import com.maslul.app.data.TransitMode
 import com.maslul.app.data.UserData
@@ -31,13 +31,13 @@ class SimpleModeTest {
     private val kids = Place("Weizmann 3", 32.08, 34.78)
 
     @Test
-    fun phoneLanguagePicksSimpleLanguage() {
-        assertEquals(SimpleLanguage.HE, SimpleLanguage.forLocale("iw"))
-        assertEquals(SimpleLanguage.HE, SimpleLanguage.forLocale("he-IL"))
-        assertEquals(SimpleLanguage.RU, SimpleLanguage.forLocale("ru_RU"))
-        assertEquals(SimpleLanguage.EN, SimpleLanguage.forLocale("fr"))
-        assertTrue(SimpleLanguage.HE.rtl)
-        assertFalse(SimpleLanguage.RU.rtl)
+    fun phoneLanguagePicksAppLanguage() {
+        assertEquals(AppLanguage.HE, AppLanguage.forLocale("iw"))
+        assertEquals(AppLanguage.HE, AppLanguage.forLocale("he-IL"))
+        assertEquals(AppLanguage.RU, AppLanguage.forLocale("ru_RU"))
+        assertEquals(AppLanguage.EN, AppLanguage.forLocale("fr"))
+        assertTrue(AppLanguage.HE.rtl)
+        assertFalse(AppLanguage.RU.rtl)
     }
 
     @Test
@@ -55,12 +55,12 @@ class SimpleModeTest {
     @Test
     fun defaultButtonsHaveNamesInEveryLanguage() {
         assertEquals(5, DefaultSimpleButtons.size)
-        SimpleLanguage.entries.forEach { l ->
+        AppLanguage.entries.forEach { l ->
             val s = SimpleStrings.of(l)
             DefaultSimpleButtons.forEach { assertTrue(it.title(s).isNotBlank()) }
         }
-        assertEquals("הנכדים", DefaultSimpleButtons[1].title(SimpleStrings.of(SimpleLanguage.HE)))
-        assertEquals("Mom", SimpleButton(SimpleIcon.HEART, label = " Mom ").title(SimpleStrings.of(SimpleLanguage.EN)))
+        assertEquals("הנכדים", DefaultSimpleButtons[1].title(SimpleStrings.of(AppLanguage.HE)))
+        assertEquals("Mom", SimpleButton(SimpleIcon.HEART, label = " Mom ").title(SimpleStrings.of(AppLanguage.EN)))
     }
 
     @Test
@@ -81,9 +81,9 @@ class SimpleModeTest {
         val old = """{"recents":[],"settings":{"reminderMinutes":10}}"""
         val d = AppJson.decodeFromString<UserData>(old)
         assertFalse(d.settings.simpleMode)
-        assertNull(d.settings.simpleLanguage)
+        assertNull(d.settings.language)
         assertEquals(DefaultSimpleButtons, d.simpleButtons)
-        val changed = d.copy(settings = d.settings.copy(simpleMode = true, simpleLanguage = SimpleLanguage.RU))
+        val changed = d.copy(settings = d.settings.copy(simpleMode = true, language = AppLanguage.RU))
             .withSimpleButton(1, SimpleButton(SimpleIcon.FAMILY, "Дети", kids))
         assertEquals(changed, AppJson.decodeFromString<UserData>(AppJson.encodeToString(changed)))
     }
@@ -129,18 +129,18 @@ class SimpleModeTest {
 
     @Test
     fun rideWordingInEachLanguage() {
-        assertEquals("Take bus 18", SimpleStrings.of(SimpleLanguage.EN).take(TransitMode.BUS, "18"))
-        assertEquals("Take train", SimpleStrings.of(SimpleLanguage.EN).take(TransitMode.TRAIN, ""))
-        assertEquals("לעלות על אוטובוס 18", SimpleStrings.of(SimpleLanguage.HE).take(TransitMode.BUS, "18"))
-        assertEquals("Проедьте 3 остановки", SimpleStrings.of(SimpleLanguage.RU).rideStops(3))
-        assertEquals("2 пересадки", SimpleStrings.of(SimpleLanguage.RU).changes(2))
+        assertEquals("Take bus 18", SimpleStrings.of(AppLanguage.EN).take(TransitMode.BUS, "18"))
+        assertEquals("Take train", SimpleStrings.of(AppLanguage.EN).take(TransitMode.TRAIN, ""))
+        assertEquals("לעלות על אוטובוס 18", SimpleStrings.of(AppLanguage.HE).take(TransitMode.BUS, "18"))
+        assertEquals("Проедьте 3 остановки", SimpleStrings.of(AppLanguage.RU).rideStops(3))
+        assertEquals("2 пересадки", SimpleStrings.of(AppLanguage.RU).changes(2))
     }
 
     @Test
     fun laterDaysAreSaidPlainly() {
-        assertEquals("Leave tomorrow at 17:59", SimpleStrings.of(SimpleLanguage.EN).leaveOn(null, "17:59"))
-        assertEquals("Leave on Sunday at 08:00", SimpleStrings.of(SimpleLanguage.EN).leaveOn(java.time.DayOfWeek.SUNDAY, "08:00"))
-        assertEquals("צאו בשבת ב־20:10", SimpleStrings.of(SimpleLanguage.HE).leaveOn(java.time.DayOfWeek.SATURDAY, "20:10"))
-        assertEquals("Выходите во вторник в 07:15", SimpleStrings.of(SimpleLanguage.RU).leaveOn(java.time.DayOfWeek.TUESDAY, "07:15"))
+        assertEquals("Leave tomorrow at 17:59", SimpleStrings.of(AppLanguage.EN).leaveOn(null, "17:59"))
+        assertEquals("Leave on Sunday at 08:00", SimpleStrings.of(AppLanguage.EN).leaveOn(java.time.DayOfWeek.SUNDAY, "08:00"))
+        assertEquals("צאו בשבת ב־20:10", SimpleStrings.of(AppLanguage.HE).leaveOn(java.time.DayOfWeek.SATURDAY, "20:10"))
+        assertEquals("Выходите во вторник в 07:15", SimpleStrings.of(AppLanguage.RU).leaveOn(java.time.DayOfWeek.TUESDAY, "07:15"))
     }
 }

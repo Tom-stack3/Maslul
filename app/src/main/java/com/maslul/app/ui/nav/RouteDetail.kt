@@ -120,6 +120,7 @@ import com.maslul.app.ui.theme.Numeric
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
+import com.maslul.app.i18n.S
 
 class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: Place, val to: Place) : ScreenModel(nav) {
     /** Live state of every ride option, by [Leg.rideKey]. */
@@ -237,12 +238,12 @@ class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: P
         val leaveAt = ((call?.takeIf { it.status == LiveStatus.LIVE }?.expected ?: first?.start ?: itinerary.start)
             .minusSeconds(walkBefore))
         val at = leaveAt.minusSeconds(minutes * 60L)
-        val text = first?.let { "Leave at ${Fmt.time(leaveAt)} · ${modeName(it.mode)} ${it.lineLabel} from ${it.from.name} at ${Fmt.time(it.start)}" }
-            ?: "Leave at ${Fmt.time(leaveAt)}"
-        val ok = Reminders.schedule(ctx, at, "Time to go to ${to.name}", text)
+        val text = S.leaveAt(Fmt.time(leaveAt)) +
+            (first?.let { " · " + S.rideFromAt(rideName(it), it.from.name, Fmt.time(it.start)) } ?: "")
+        val ok = Reminders.schedule(ctx, at, S.timeToGoTo(to.name), text)
         Toast.makeText(
             ctx,
-            if (ok) "Reminder set for ${Fmt.time(at)} ($minutes min before leaving)" else "That departure is too soon for a reminder",
+            if (ok) S.reminderSet(Fmt.time(at), minutes) else S.reminderTooSoon,
             Toast.LENGTH_SHORT,
         ).show()
     }
@@ -250,17 +251,17 @@ class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: P
     fun share(ctx: Context) {
         val text = buildString {
             val e = expected()
-            appendLine("My trip to ${to.name}: ${Fmt.time(e.start)} → ${Fmt.time(e.end)} (${Fmt.duration(e.durationSec)})")
+            appendLine(S.shareTitle(to.name, Fmt.time(e.start), Fmt.time(e.end), Fmt.duration(e.durationSec)))
             itinerary.legs.forEach { l ->
                 if (l.mode == TransitMode.WALK) {
-                    if (l.durationSec >= 60) appendLine("• Walk ${Fmt.duration(l.durationSec)} to ${l.to.name.ifBlank { to.name }}")
+                    if (l.durationSec >= 60) appendLine("• " + S.shareWalk(Fmt.duration(l.durationSec), l.to.name.ifBlank { to.name }))
                 } else {
-                    appendLine("• ${modeName(l.mode)} ${l.lineLabel} from ${l.from.name} at ${Fmt.time(l.start)} → ${l.to.name} (${Fmt.time(l.end)})")
+                    appendLine("• " + S.rideFromAt(rideName(l), l.from.name, Fmt.time(l.start)) + " ${S.arrow} ${l.to.name} (${Fmt.time(l.end)})")
                 }
             }
         }
         ctx.startActivity(
-            Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share trip"),
+            Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), S.shareTrip),
         )
     }
 }
@@ -277,7 +278,7 @@ fun RouteDetailScreen(model: RouteDetailModel) {
 
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
         if (res[Manifest.permission.ACCESS_FINE_LOCATION] == true || model.location.hasPermission()) model.start(ctx)
-        else Toast.makeText(ctx, "Live directions need location access", Toast.LENGTH_SHORT).show()
+        else Toast.makeText(ctx, S.liveNeedsLocation, Toast.LENGTH_SHORT).show()
     }
     val startLive = {
         val perms = buildList {
@@ -346,7 +347,7 @@ fun RouteDetailScreen(model: RouteDetailModel) {
                 FilledTonalIconButton(
                     onClick = { model.nav.pop() },
                     modifier = Modifier.statusBarsPadding().padding(12.dp),
-                ) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+                ) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, S.back) }
                 Column(
                     Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -354,7 +355,7 @@ fun RouteDetailScreen(model: RouteDetailModel) {
                     FilledTonalIconButton(
                         onClick = { scope.launch { if (mapOnly) sheet.partialExpand() else sheet.hide() } },
                         modifier = Modifier.testTag("map_expand"),
-                    ) { Icon(if (mapOnly) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen, if (mapOnly) "Show details" else "Expand map") }
+                    ) { Icon(if (mapOnly) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen, if (mapOnly) S.showDetails else S.expandMap) }
                     FilledTonalIconButton(
                         onClick = {
                             // Jump to the last fix right away, then to a fresh one.
@@ -362,12 +363,12 @@ fun RouteDetailScreen(model: RouteDetailModel) {
                             model.scope.launch { model.location.current()?.let { mapController.moveTo(it, 15.5) } }
                         },
                         modifier = Modifier.testTag("map_my_location"),
-                    ) { Icon(Icons.Rounded.MyLocation, "My location", tint = MaterialTheme.colorScheme.primary) }
+                    ) { Icon(Icons.Rounded.MyLocation, S.myLocation, tint = MaterialTheme.colorScheme.primary) }
                 }
                 val followed = model.following?.let { i -> model.live(i)?.takeIf { it.status == LiveStatus.LIVE }?.vehicle?.let { i to it } }
                 if (followed != null) {
                     LiveLocationCard(
-                        "${model.itinerary.legs[followed.first].lineLabel} live location",
+                        S.liveLocationOf(model.itinerary.legs[followed.first].lineLabel),
                         followed.second.recordedAt,
                         Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(horizontal = 64.dp, vertical = 12.dp),
                         onClose = { model.following = null },
@@ -377,7 +378,7 @@ fun RouteDetailScreen(model: RouteDetailModel) {
                     ExtendedFloatingActionButton(
                         onClick = { scope.launch { sheet.partialExpand() } },
                         icon = { Icon(Icons.Rounded.ExpandLess, null) },
-                        text = { Text("Trip details") },
+                        text = { Text(S.tripDetails) },
                         containerColor = MaterialTheme.colorScheme.surface,
                         modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp),
                     )
@@ -463,15 +464,15 @@ private fun RouteMap(model: RouteDetailModel, modifier: Modifier, padding: Paddi
 private fun DetailHeader(itin: Itinerary, active: Boolean, onStart: () -> Unit, onRemind: () -> Unit, onShare: () -> Unit) {
     Column(Modifier.padding(horizontal = 20.dp).padding(top = 4.dp, bottom = 8.dp)) {
         Row(verticalAlignment = Alignment.Bottom) {
-            Text("${Fmt.time(itin.start)} → ${Fmt.time(itin.end)}", style = MaterialTheme.typography.headlineSmall.merge(Numeric))
+            Text("${Fmt.time(itin.start)} ${S.arrow} ${Fmt.time(itin.end)}", style = MaterialTheme.typography.headlineSmall.merge(Numeric))
             Spacer(Modifier.width(10.dp))
             Text(Fmt.duration(itin.durationSec), style = MaterialTheme.typography.titleMedium, color = LocalExtra.current.subtle,
                 modifier = Modifier.padding(bottom = 2.dp))
         }
         Text(
             buildString {
-                append(if (itin.transfers == 0) "No transfers" else "${itin.transfers} transfer${if (itin.transfers > 1) "s" else ""}")
-                if (itin.walkMeters > 0) append(" · ${Fmt.distance(itin.walkMeters)} walking")
+                append(if (itin.transfers == 0) S.noTransfers else S.transfers(itin.transfers))
+                if (itin.walkMeters > 0) append(" · " + S.walkingDistance(Fmt.distance(itin.walkMeters)))
             },
             style = MaterialTheme.typography.bodyMedium,
             color = LocalExtra.current.subtle,
@@ -481,15 +482,15 @@ private fun DetailHeader(itin: Itinerary, active: Boolean, onStart: () -> Unit, 
             Button(onClick = onStart, shape = CircleShape, modifier = Modifier.height(46.dp).testTag("start_button")) {
                 Icon(if (active) Icons.Rounded.Stop else Icons.Rounded.Navigation, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text(if (active) "End" else "Start")
+                Text(if (active) S.end else S.start)
             }
             FilledTonalButton(onClick = onRemind, shape = CircleShape, modifier = Modifier.height(46.dp)) {
                 Icon(Icons.Rounded.AlarmAdd, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Remind me")
+                Text(S.remindMe)
             }
             OutlinedButton(onClick = onShare, shape = CircleShape, modifier = Modifier.height(46.dp)) {
-                Icon(Icons.Rounded.Share, "Share", Modifier.size(18.dp))
+                Icon(Icons.Rounded.Share, S.share, Modifier.size(18.dp))
             }
         }
     }
@@ -513,7 +514,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
     Column {
         // Origin
         TimelineRow(null, railOf(legs.first()), Node.ENDPOINT, onSurface, time = { TimeText(expected.start) }) {
-            Text(model.from.name.takeIf { model.from.kind != PlaceKind.CURRENT_LOCATION } ?: "Your location",
+            Text(model.from.name.takeIf { model.from.kind != PlaceKind.CURRENT_LOCATION } ?: S.yourLocation,
                 style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
             Spacer(Modifier.height(10.dp))
         }
@@ -523,7 +524,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
                 // A node where the walk (or the lift) ends, unless the next leg draws its own boarding node.
                 val next = legs.getOrNull(i + 1)
                 if (next != null && !next.mode.isTransit) {
-                    val name = leg.to.name.ifBlank { if (leg.mode == TransitMode.CAR) "Get out here" else "" }
+                    val name = leg.to.name.ifBlank { if (leg.mode == TransitMode.CAR) S.getOutHere else "" }
                     TimelineRow(railOf(leg), railOf(next), Node.SMALL, if (leg.mode == TransitMode.CAR) x.subtle else x.walk,
                         time = if (leg.mode == TransitMode.CAR) ({ TimeText(leg.end) }) else null) {
                         Text(name, style = MaterialTheme.typography.bodyMedium)
@@ -544,7 +545,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
                 ) {
                     Text(leg.from.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
                     if (leg.tripId != null && leg.tripId == model.from.tripId) {
-                        Text("You're on this ${leg.mode.vehicle}: stay on", style = MaterialTheme.typography.bodySmall, color = x.subtle)
+                        Text(S.youreOnThis(leg.mode), style = MaterialTheme.typography.bodySmall, color = x.subtle)
                     }
                     leg.from.platformLabel?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = x.subtle) }
                     model.tightTransferInto(leg)?.let { TransferWarning(it, modifier = Modifier.padding(top = 4.dp)) }
@@ -560,7 +561,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
                     time = { TimeText(leg.end, live?.alightExpected, live.freshness(now)) },
                 ) {
                     Text(leg.to.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
-                    Text("Get off", style = MaterialTheme.typography.bodySmall, color = x.subtle)
+                    Text(S.getOff, style = MaterialTheme.typography.bodySmall, color = x.subtle)
                     Spacer(Modifier.height(8.dp))
                 }
             }
@@ -598,7 +599,7 @@ private fun WalkSegment(leg: Leg, rail: RailSpec) {
             Icon(com.maslul.app.ui.components.modeIcon(TransitMode.WALK), null, tint = x.subtle, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
             Text(
-                "Walk ${Fmt.duration(leg.durationSec)}" + (leg.distanceM?.let { " · ${Fmt.distance(it)}" } ?: ""),
+                S.walkDuration(Fmt.duration(leg.durationSec)) + (leg.distanceM?.takeIf { it >= 1 }?.let { " · ${Fmt.distance(it)}" } ?: ""),
                 style = MaterialTheme.typography.bodyMedium, color = x.subtle,
             )
             if (leg.steps.isNotEmpty()) Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = x.subtle)
@@ -623,7 +624,7 @@ private fun CarSegment(leg: Leg, rail: RailSpec) {
             Icon(com.maslul.app.ui.components.modeIcon(TransitMode.CAR), null, tint = x.subtle, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
             Text(
-                "Ride ${Fmt.duration(leg.durationSec)}" + (leg.distanceM?.let { " · ${Fmt.distance(it)}" } ?: ""),
+                S.rideDuration(Fmt.duration(leg.durationSec)) + (leg.distanceM?.takeIf { it >= 1 }?.let { " · ${Fmt.distance(it)}" } ?: ""),
                 style = MaterialTheme.typography.bodyMedium, color = x.subtle,
             )
         }
@@ -652,7 +653,7 @@ private fun TransitSegment(model: RouteDetailModel, index: Int, leg: Leg, rail: 
             LineBadge(leg.lineLabel, leg.mode, color = lineColor(leg))
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
-                Text(leg.headsign?.let { "to $it" } ?: modeName(leg.mode), style = MaterialTheme.typography.bodyMedium,
+                Text(leg.headsign?.let { S.toHeadsign(it) } ?: modeName(leg.mode), style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 leg.agencyName?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = x.subtle) }
             }
@@ -664,7 +665,7 @@ private fun TransitSegment(model: RouteDetailModel, index: Int, leg: Leg, rail: 
             LiveStatusChip(live, leg, now, onClick = { model.following = legIndex })
         }
         if (model.lookingForRidesAfter(index)) {
-            Text("If you miss it: checking the next rides…", style = MaterialTheme.typography.labelMedium,
+            Text(S.missedChecking, style = MaterialTheme.typography.labelMedium,
                 color = x.subtle, modifier = Modifier.padding(top = 8.dp).testTag("missed_rides_loading"))
         }
         model.ridesAfter(index)?.let { MissedRides(leg, it, Modifier.padding(top = 8.dp)) }
@@ -681,7 +682,7 @@ private fun TransitSegment(model: RouteDetailModel, index: Int, leg: Leg, rail: 
                 .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Ride $n stop${if (n > 1) "s" else ""} · ${Fmt.duration(leg.durationSec)}", style = MaterialTheme.typography.bodySmall, color = x.subtle)
+            Text(S.rideStops(n) + " · " + Fmt.duration(leg.durationSec), style = MaterialTheme.typography.bodySmall, color = x.subtle)
             if (leg.intermediateStops.isNotEmpty()) {
                 Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null, tint = x.subtle, modifier = Modifier.size(18.dp))
             }
@@ -707,7 +708,7 @@ private fun MissedRides(leg: Leg, rides: List<Leg>, modifier: Modifier = Modifie
     val x = LocalExtra.current
     Column(modifier.testTag("missed_rides")) {
         Text(
-            if (rides.isEmpty()) "If you miss it: no other ride within the hour" else "If you miss it, next:",
+            if (rides.isEmpty()) S.missedNone else S.missedNext,
             style = MaterialTheme.typography.labelMedium, color = x.subtle,
         )
         if (rides.isNotEmpty()) {
@@ -749,14 +750,14 @@ private fun LineOptions(
     val x = LocalExtra.current
     val options = rides.map { it to rideLive[it.rideKey] }.sortedBy { (o, c) -> Combine.boards(o, c) }
     val lines = options.distinctBy { Combine.lineKey(it.first) }.size
-    val vehicles = TransitMode.vehiclesOf(options.map { it.first })
+    val mode = options.map { it.first.mode }.distinct().singleOrNull()
     Text(
         when {
-            lines > 1 -> "${options.size} $vehicles go this way"
+            lines > 1 -> S.nGoThisWay(options.size, mode)
             // The user's own shuttle: "Next 2 shuttles", not "buses of Office shuttle".
-            options.all { it.first.shuttleId != null } -> "Next ${options.size} shuttles"
-            else -> "Next ${options.size} $vehicles of ${leg.lineLabel}"
-        } + " · tap to choose",
+            options.all { it.first.shuttleId != null } -> S.nextNShuttles(options.size)
+            else -> S.nextNOf(options.size, mode, leg.lineLabel)
+        } + " · " + S.tapToChoose,
         style = MaterialTheme.typography.labelMedium, color = x.subtle,
     )
     Spacer(Modifier.height(6.dp))
@@ -784,12 +785,12 @@ private fun LineOptions(
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        "${Fmt.time(dep)} → ${Fmt.time(arr)}",
+                        "${Fmt.time(dep)} ${S.arrow} ${Fmt.time(arr)}",
                         style = MaterialTheme.typography.bodyMedium.merge(Numeric),
                         fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal,
                     )
                     Text(
-                        listOfNotNull(o.headsign?.let { "to $it" } ?: modeName(o.mode), o.from.platformLabel).joinToString(" · "),
+                        listOfNotNull(o.headsign?.let { S.toHeadsign(it) } ?: modeName(o.mode), o.from.platformLabel).joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -802,9 +803,9 @@ private fun LineOptions(
                             Spacer(Modifier.width(4.dp))
                             Text(Fmt.relative(dep, now), style = MaterialTheme.typography.labelLarge.merge(Numeric), color = freshnessColor(f))
                         }
-                        if (hurry(o)) Text("Hurry", style = MaterialTheme.typography.labelMedium, color = x.late, fontWeight = FontWeight.SemiBold)
+                        if (hurry(o)) Text(S.hurry, style = MaterialTheme.typography.labelMedium, color = x.late, fontWeight = FontWeight.SemiBold)
                     }
-                    LiveStatus.PASSED -> Text("Passed", style = MaterialTheme.typography.labelMedium, color = x.late)
+                    LiveStatus.PASSED -> Text(S.passed, style = MaterialTheme.typography.labelMedium, color = x.late)
                     else -> Text(Fmt.relative(dep, now), style = MaterialTheme.typography.labelLarge.merge(Numeric), color = x.subtle)
                 }
                 Spacer(Modifier.width(6.dp))
@@ -813,7 +814,7 @@ private fun LineOptions(
         val hidden = options.size - shown.size
         if (hidden > 0 || expanded && options.size > SHOWN_RIDES) {
             Text(
-                if (expanded) "Show fewer" else "$hidden more",
+                if (expanded) S.showFewer else S.nMoreRides(hidden),
                 style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(horizontal = 14.dp, vertical = 10.dp)
                     .testTag("more_rides"),
@@ -829,19 +830,20 @@ fun LiveStatusChip(live: LiveCall?, leg: Leg, now: Instant, onClick: (() -> Unit
     val (text, color, dot) = when (live?.status) {
         LiveStatus.LIVE -> {
             val eta = live.expected ?: leg.start
-            val away = live.stopsAway?.takeIf { it in 1..40 }?.let { " · $it stop${if (it > 1) "s" else ""} away" } ?: ""
-            Triple("Arrives ${Fmt.relative(eta, now).let { if (it == "Now") "now" else "in $it" }}$away", freshnessColor(freshness), true)
+            val away = live.stopsAway?.takeIf { it in 1..40 }?.let { " · " + S.stopsAway(it) } ?: ""
+            val soon = eta.epochSecond - now.epochSecond < 45
+            Triple(S.arrives(if (soon) null else Fmt.relative(eta, now)) + away, freshnessColor(freshness), true)
         }
-        LiveStatus.PASSED -> Triple("Already passed this stop — check the next one", x.late, false)
-        LiveStatus.UNTRACKED -> Triple("No live data · scheduled ${Fmt.time(leg.start)}", x.subtle, false)
-        LiveStatus.SCHEDULED -> Triple("Scheduled ${Fmt.time(leg.start)} · not departed yet", x.subtle, false)
-        null -> Triple("Timetable ${Fmt.time(leg.start)}", x.subtle, false)
+        LiveStatus.PASSED -> Triple(S.passedThisStop, x.late, false)
+        LiveStatus.UNTRACKED -> Triple(S.noLiveScheduled(Fmt.time(leg.start)), x.subtle, false)
+        LiveStatus.SCHEDULED -> Triple(S.scheduledNotDeparted(Fmt.time(leg.start)), x.subtle, false)
+        null -> Triple(S.timetable(Fmt.time(leg.start)), x.subtle, false)
     }
     // A live vehicle can be shown on the map; timetable-only rows aren't tappable.
     val tappable = onClick != null && live?.status == LiveStatus.LIVE && live.vehicle != null
     Row(
         Modifier.clip(RoundedCornerShape(10.dp)).background(color.copy(alpha = 0.1f))
-            .then(if (tappable) Modifier.clickable(onClickLabel = "Show on map") { onClick!!() } else Modifier)
+            .then(if (tappable) Modifier.clickable(onClickLabel = S.showOnMap) { onClick!!() } else Modifier)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

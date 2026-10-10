@@ -73,6 +73,7 @@ import com.maslul.app.ui.theme.LocalExtra
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.maslul.app.i18n.S
 
 enum class SearchField { FROM, TO }
 
@@ -177,9 +178,9 @@ fun SearchScreen(model: SearchModel) {
         Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 2.dp) {
             Column(Modifier.statusBarsPadding().padding(bottom = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                    IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+                    IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, S.back) }
                     if (model.single || model.title != null) {
-                        Text(model.title ?: "Search", style = MaterialTheme.typography.titleMedium)
+                        Text(model.title ?: S.search, style = MaterialTheme.typography.titleMedium)
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 16.dp, end = 4.dp)) {
@@ -187,7 +188,7 @@ fun SearchScreen(model: SearchModel) {
                         if (!model.single) {
                             Field(
                                 value = model.fromText,
-                                placeholder = if (model.from?.kind == PlaceKind.CURRENT_LOCATION) "Current location" else "Starting point",
+                                placeholder = if (model.from?.kind == PlaceKind.CURRENT_LOCATION) S.currentLocation else S.startingPoint,
                                 dotColor = MaterialTheme.colorScheme.onSurface,
                                 hollow = true,
                                 active = model.editing == SearchField.FROM,
@@ -201,9 +202,9 @@ fun SearchScreen(model: SearchModel) {
                         Field(
                             value = model.toText,
                             placeholder = when {
-                                model.single -> "Search address or place"
-                                model.to?.kind == PlaceKind.CURRENT_LOCATION -> "Current location"
-                                else -> "Where to?"
+                                model.single -> S.searchAddressOrPlace
+                                model.to?.kind == PlaceKind.CURRENT_LOCATION -> S.currentLocation
+                                else -> S.whereTo
                             },
                             dotColor = MaterialTheme.colorScheme.primary,
                             hollow = false,
@@ -215,7 +216,7 @@ fun SearchScreen(model: SearchModel) {
                         )
                     }
                     if (!model.single) {
-                        IconButton(onClick = model::swap) { Icon(Icons.Rounded.SwapVert, "Swap") }
+                        IconButton(onClick = model::swap) { Icon(Icons.Rounded.SwapVert, S.swap) }
                     } else {
                         Spacer(Modifier.width(12.dp))
                     }
@@ -231,9 +232,9 @@ fun SearchScreen(model: SearchModel) {
         LazyColumn(Modifier.fillMaxSize().testTag("search_results"), state = listState) {
             val q = model.query
             if (q.length >= 2) {
-                if (model.failed) item { MessageBox("Couldn't search", body = "Check your connection and try again.") }
+                if (model.failed) item { MessageBox(S.couldntSearch, body = S.checkConnection) }
                 else if (!model.loading && model.results.isEmpty()) {
-                    item { MessageBox("No results", body = "Try a street, city or place name — Hebrew or English.", icon = Icons.Rounded.Place) }
+                    item { MessageBox(S.noResults, body = S.noResultsHint, icon = Icons.Rounded.Place) }
                 }
                 items(model.results, key = { "r" + it.key + it.kind }) { p ->
                     PlaceRow(p.name, p.subtitle, icon = kindIcon(p.kind), iconTint = kindTint(p.kind),
@@ -244,30 +245,30 @@ fun SearchScreen(model: SearchModel) {
             } else {
                 if (!model.single) {
                     item {
-                        PlaceRow("Current location", null, icon = Icons.Rounded.MyLocation, iconTint = MaterialTheme.colorScheme.primary) {
+                        PlaceRow(S.currentLocation, null, icon = Icons.Rounded.MyLocation, iconTint = MaterialTheme.colorScheme.primary) {
                             model.choose(CurrentLocation)
                         }
                     }
                     if (model.editing == SearchField.FROM && data.settings.onBoard) {
                         item {
-                            PlaceRow("On a bus or train now", "Plan from the ride you're on", icon = Icons.Rounded.DirectionsBus,
+                            PlaceRow(S.onBusOrTrainNow, S.planFromRide, icon = Icons.Rounded.DirectionsBus,
                                 iconTint = MaterialTheme.colorScheme.primary) { model.pickOnBoard() }
                         }
                     }
                 }
-                item { PlaceRow("Choose on map", null, icon = Icons.Rounded.Map) { model.pickOnMap() } }
+                item { PlaceRow(S.chooseOnMap, null, icon = Icons.Rounded.Map) { model.pickOnMap() } }
                 if (!model.single) {
-                    data.home?.let { h -> item { PlaceRow("Home", h.name, icon = Icons.Rounded.Home) { model.choose(h) } } }
-                    data.work?.let { w -> item { PlaceRow("Work", w.name, icon = Icons.Rounded.Work) { model.choose(w) } } }
+                    data.home?.let { h -> item { PlaceRow(S.home, h.name, icon = Icons.Rounded.Home) { model.choose(h) } } }
+                    data.work?.let { w -> item { PlaceRow(S.work, w.name, icon = Icons.Rounded.Work) { model.choose(w) } } }
                 }
-                if (data.favoritePlaces.isNotEmpty()) item { SectionHeader("Favorites") }
+                if (data.favoritePlaces.isNotEmpty()) item { SectionHeader(S.favorites) }
                 items(data.favoritePlaces, key = { "f" + it.key }) { f ->
                     PlaceRow(f.label, if (f.label == f.place.name) f.place.subtitle else f.place.name,
                         icon = f.icon.vector(), iconTint = MaterialTheme.colorScheme.primary,
                         onLongClick = { draft = FavoriteDraft.of(model.store, f.place) },
                     ) { model.choose(f.place) }
                 }
-                if (data.recents.isNotEmpty()) item { SectionHeader("Recent") }
+                if (data.recents.isNotEmpty()) item { SectionHeader(S.recent) }
                 items(data.recents, key = { "h" + it.key }) { p ->
                     PlaceRow(p.name, p.subtitle, icon = Icons.Rounded.History,
                         trailing = if (model.single) null else ({ FavoriteStar(data.favoriteFor(p) != null) { draft = FavoriteDraft.of(model.store, p) } }),
@@ -285,7 +286,7 @@ private fun FavoriteStar(saved: Boolean, onClick: () -> Unit) {
     IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
         Icon(
             if (saved) Icons.Rounded.Star else Icons.Rounded.StarBorder,
-            if (saved) "Edit favorite" else "Save as favorite",
+            if (saved) S.editFavorite else S.saveAsFavorite,
             tint = if (saved) FavoriteGold else LocalExtra.current.subtle,
             modifier = Modifier.size(20.dp),
         )
@@ -330,7 +331,7 @@ private fun Field(
         }
         if (active && value.text.isNotEmpty()) {
             IconButton(onClick = { onChange(TextFieldValue("")) }, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Rounded.Close, "Clear", modifier = Modifier.size(18.dp), tint = LocalExtra.current.subtle)
+                Icon(Icons.Rounded.Close, S.clear, modifier = Modifier.size(18.dp), tint = LocalExtra.current.subtle)
             }
         }
     }

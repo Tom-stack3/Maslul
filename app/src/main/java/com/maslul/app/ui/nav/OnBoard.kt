@@ -63,6 +63,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
+import com.maslul.app.i18n.S
 
 /**
  * "Which ride are you on?": the buses and trains around the user, live ones nearest first,
@@ -89,14 +90,14 @@ class OnBoardModel(nav: AppNav, private val onPicked: (Place) -> Unit) : ScreenM
             error = null
             val p = runCatching { location.current() }.getOrNull() ?: location.last.value
             if (p == null) {
-                error = "Your location is needed to find the ride you're on."
+                error = S.errOnBoardLocation
                 loading = false
                 return@launch
             }
             here = p
             runCatching { repo.boardCandidates(p) }
                 .onSuccess { candidates = tidy(it); resolveLoose() }
-                .onFailure { if (candidates.isEmpty()) error = "Couldn't look for rides. Check your connection." }
+                .onFailure { if (candidates.isEmpty()) error = S.errOnBoardNetwork }
             loading = false
         }
     }
@@ -151,7 +152,7 @@ class OnBoardModel(nav: AppNav, private val onPicked: (Place) -> Unit) : ScreenM
             picking = null
             val p = here
             if (tripId == null || p == null) {
-                error = "Couldn't find the timetable of ${modeName(c.mode)} ${c.lineLabel}. Try another, or refresh."
+                error = S.errOnBoardTimetable(rideName(c.mode, c.lineLabel))
                 return@launch
             }
             onPicked(Place(boardName(c), p.lat, p.lon, kind = PlaceKind.ON_BOARD, tripId = tripId))
@@ -161,9 +162,8 @@ class OnBoardModel(nav: AppNav, private val onPicked: (Place) -> Unit) : ScreenM
     companion object {
         /** "On bus 480 to Haifa", "On the train to Nahariya". */
         fun boardName(c: BoardCandidate): String {
-            val ride = if (c.lineLabel.equals(modeName(c.mode), ignoreCase = true) || c.lineLabel == "—") "the ${c.mode.vehicle}"
-                else "${c.mode.vehicle} ${c.lineLabel}"
-            return "On $ride" + c.headsign.takeIf { it.isNotBlank() }?.let { " to $it" }.orEmpty()
+            val line = c.lineLabel.takeUnless { it.equals(modeName(c.mode), ignoreCase = true) || it == "—" }
+            return S.onBoardName(c.mode, line, c.headsign.takeIf { it.isNotBlank() })
         }
     }
 }
@@ -177,14 +177,14 @@ fun OnBoardScreen(model: OnBoardModel) {
         Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 2.dp) {
             Column(Modifier.statusBarsPadding().padding(bottom = 10.dp)) {
                 Row(Modifier.padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+                    IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, S.back) }
                     Column(Modifier.weight(1f)) {
-                        Text("Which ride are you on?", style = MaterialTheme.typography.titleLarge)
-                        Text("Plan the rest of your trip from it", style = MaterialTheme.typography.bodySmall, color = x.subtle)
+                        Text(S.whichRide, style = MaterialTheme.typography.titleLarge)
+                        Text(S.whichRideHint, style = MaterialTheme.typography.bodySmall, color = x.subtle)
                     }
-                    IconButton(onClick = { model.refresh() }, enabled = !model.loading) { Icon(Icons.Rounded.Refresh, "Refresh") }
+                    IconButton(onClick = { model.refresh() }, enabled = !model.loading) { Icon(Icons.Rounded.Refresh, S.refresh) }
                 }
-                SearchBox(model.query, { model.query = it }, "Line number or destination", Modifier.testTag("onboard_filter"))
+                SearchBox(model.query, { model.query = it }, S.lineOrDestination, Modifier.testTag("onboard_filter"))
                 if (model.modes.size > 1) {
                     Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
@@ -204,27 +204,26 @@ fun OnBoardScreen(model: OnBoardModel) {
         }
         val shown = model.shown
         when {
-            model.loading -> LoadingBox(text = "Looking for rides around you…")
+            model.loading -> LoadingBox(text = S.lookingForRides)
             model.candidates.isEmpty() && model.error != null ->
-                MessageBox("Can't tell which ride", body = model.error, action = "Try again", onAction = { model.refresh() })
+                MessageBox(S.cantTellRide, body = model.error, action = S.tryAgain, onAction = { model.refresh() })
             model.candidates.isEmpty() -> MessageBox(
-                "No rides found around you",
-                body = "Rides show up here while you're on a bus or train, or at a stop one is due at.",
-                icon = Icons.Rounded.DirectionsBus, action = "Refresh", onAction = { model.refresh() },
+                S.noRidesAround,
+                body = S.noRidesAroundHint,
+                icon = Icons.Rounded.DirectionsBus, action = S.refresh, onAction = { model.refresh() },
             )
             else -> LazyColumn(Modifier.fillMaxSize().testTag("onboard_list")) {
                 model.error?.let { e ->
                     item { Text(e, style = MaterialTheme.typography.bodySmall, color = x.late, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
                 }
                 if (shown.isEmpty()) item {
-                    Text("Nothing matches. Clear the filter to see every ride around you.", style = MaterialTheme.typography.bodyMedium,
+                    Text(S.nothingMatchesRides, style = MaterialTheme.typography.bodyMedium,
                         color = x.subtle, modifier = Modifier.padding(20.dp))
                 }
                 items(shown, key = { it.key }) { c -> CandidateRow(c, now, model.picking == c.key) { model.pick(c) } }
                 item {
                     Text(
-                        "Live buses closest to you come first. After you pick one, the trip is planned from its next stop: " +
-                            "stay on, or where to get off and change.",
+                        S.onBoardFooter,
                         style = MaterialTheme.typography.labelSmall, color = x.subtle,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp).navigationBarsPadding(),
                     )
@@ -242,7 +241,7 @@ private fun CandidateRow(c: BoardCandidate, now: Instant, busy: Boolean, onClick
             LineBadge(c.lineLabel, c.mode, color = lineColor(c.mode, c.routeColor, c.agencyId, c.agencyName))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(c.headsign.takeIf { it.isNotBlank() }?.let { "to $it" } ?: modeName(c.mode),
+                Text(c.headsign.takeIf { it.isNotBlank() }?.let { S.toHeadsign(it) } ?: modeName(c.mode),
                     style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val v = c.vehicle
                 if (v != null) {
@@ -250,12 +249,12 @@ private fun CandidateRow(c: BoardCandidate, now: Instant, busy: Boolean, onClick
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         LiveSignal(f)
                         Spacer(Modifier.width(4.dp))
-                        Text("Live · ${Fmt.distance(c.distanceM)} from you", style = MaterialTheme.typography.bodySmall, color = freshnessColor(f))
+                        Text(S.liveFromYou(Fmt.distance(c.distanceM)), style = MaterialTheme.typography.bodySmall, color = freshnessColor(f))
                     }
                 } else {
                     Text(
-                        listOfNotNull(c.stopName?.let { "Due at $it" }, c.stopTime?.let(Fmt::time)).joinToString(" · ")
-                            .ifEmpty { "Timetable" } + " · no live data",
+                        listOfNotNull(c.stopName?.let { S.dueAt(it) }, c.stopTime?.let(Fmt::time)).joinToString(" · ")
+                            .ifEmpty { S.timetableWord } + " · " + S.noLiveData,
                         style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }

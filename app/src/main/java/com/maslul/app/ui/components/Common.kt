@@ -66,6 +66,7 @@ import com.maslul.app.data.freshness
 import com.maslul.app.ui.theme.LocalExtra
 import com.maslul.app.ui.theme.ModeColors
 import com.maslul.app.ui.theme.Numeric
+import com.maslul.app.i18n.S
 
 fun modeIcon(mode: TransitMode): ImageVector = when (mode) {
     TransitMode.WALK -> Icons.AutoMirrored.Rounded.DirectionsWalk
@@ -79,17 +80,7 @@ fun modeIcon(mode: TransitMode): ImageVector = when (mode) {
     TransitMode.CAR -> Icons.Rounded.DirectionsCar
 }
 
-fun modeName(mode: TransitMode): String = when (mode) {
-    TransitMode.WALK -> "Walk"
-    TransitMode.BUS -> "Bus"
-    TransitMode.TRAIN -> "Train"
-    TransitMode.LIGHT_RAIL -> "Light rail"
-    TransitMode.METRO -> "Carmelit"
-    TransitMode.CABLE_CAR -> "Cable car"
-    TransitMode.FERRY -> "Ferry"
-    TransitMode.OTHER -> "Transit"
-    TransitMode.CAR -> "Car"
-}
+fun modeName(mode: TransitMode): String = S.mode(mode)
 
 /**
  * Colour of a line: the feed's route_color if it has a meaningful one, else the operator's
@@ -191,7 +182,7 @@ fun MinutesText(call: LiveCall?, fallback: java.time.Instant, now: java.time.Ins
     Column(modifier, horizontalAlignment = Alignment.End) {
         ArrivalTime(Fmt.relative(t, now), call.freshness(now))
         if (call?.status == LiveStatus.UNTRACKED) {
-            Text("no live data", style = MaterialTheme.typography.labelSmall, color = LocalExtra.current.subtle)
+            Text(S.noLiveData, style = MaterialTheme.typography.labelSmall, color = LocalExtra.current.subtle)
         }
     }
 }

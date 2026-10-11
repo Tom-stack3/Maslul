@@ -211,6 +211,8 @@ class OnBoardTest {
         // Fixes jumping about within their own uncertainty (underground) aren't movement.
         val jitter = listOf(fix(0.0, 0, accuracy = 80f), fix(0.15, 20, accuracy = 80f))
         assertNull(Motion.heading(jitter, 25_000))
+        // Nor is a fix that jumped 2 km in 10 s (a cell tower's position, underground).
+        assertNull(Motion.heading(listOf(fix(0.0, 20), fix(2.0, 30)), 32_000))
         // Nor is drifting slower than walking pace.
         assertNull(Motion.heading(listOf(fix(0.0, 0), fix(0.1, 110)), 115_000))
     }

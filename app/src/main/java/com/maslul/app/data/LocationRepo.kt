@@ -114,11 +114,14 @@ object Motion {
      */
     private const val APART_M = 80.0
     private const val SINCE_MS = 2 * 60_000L
+    /** Faster than any train here (160 km/h): a fix that jumped, not movement. */
+    private const val MAX_MPS = 50.0
 
     /**
      * Degrees from north, or null: the latest fix's own bearing when it's moving, else from an
      * earlier fix far enough back (a train stopped at a station still came from somewhere).
-     * Fixes jumping about while you stand still are too slow apart to count.
+     * Fixes jumping about while you stand still are too slow apart to count, and one that jumped
+     * far (a cell tower's position underground) too fast.
      */
     fun heading(fixes: List<Fix>, nowMs: Long): Float? {
         val last = fixes.lastOrNull()?.takeIf { nowMs - it.atMs <= FRESH_MS } ?: return null
@@ -128,7 +131,7 @@ object Motion {
             val d = GeoMath.distance(f.point, last.point)
             val sec = (last.atMs - f.atMs) / 1000.0
             val fuzz = 2.0 * ((f.accuracyM ?: 0f) + (last.accuracyM ?: 0f))
-            if (d >= maxOf(APART_M, fuzz) && sec > 0 && d / sec >= 1.2) return GeoMath.bearing(f.point, last.point)
+            if (d >= maxOf(APART_M, fuzz) && sec > 0 && d / sec in 1.2..MAX_MPS) return GeoMath.bearing(f.point, last.point)
         }
         return null
     }

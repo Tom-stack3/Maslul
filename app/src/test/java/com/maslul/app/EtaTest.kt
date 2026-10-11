@@ -192,4 +192,15 @@ class EtaTest {
         // MOTIS ignores fractional-second times and answers from the start of the day.
         assertEquals("2026-09-28T16:00:00Z", TransitousApi.queryTime(Instant.parse("2026-09-28T16:00:00.123456Z")))
     }
+
+    @Test
+    fun aBoardKeepsTheNextFewOfEachLine() {
+        val now = origin
+        fun dep(line: String, min: Long) = departure("t$line-$min", now.plusSeconds(min * 60)).copy(routeId = "il-Israel-MOT_$line")
+        val deps = listOf(dep("1", -5)) + (1L..6L).map { dep("1", it * 5) } + listOf(dep("2", 4), dep("2", 50))
+        val kept = TransitRepository.perLine(deps, now)
+        // Line 1: the one whose time passed (it may be late) and the next three; line 2 both.
+        assertEquals(setOf("t1--5", "t1-5", "t1-10", "t1-15", "t2-4", "t2-50"), kept.map { it.tripId }.toSet())
+        assertEquals(6, kept.size)
+    }
 }

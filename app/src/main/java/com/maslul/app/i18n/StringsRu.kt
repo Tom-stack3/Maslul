@@ -421,6 +421,7 @@ internal object Russian : Strings() {
     override val noLinesNearbyHint = "Разрешите доступ к геолокации, чтобы видеть линии вокруг."
     override val lineDetailsUnavailable = "Информация о линии недоступна"
     override fun thenTime(time: String) = "затем $time"
+    override val showDepartures = "Показать отправления"
     override fun nVariants(n: Int) = "$n ${ruPlural(n.toLong(), "вариант", "варианта", "вариантов")}"
     override val errSearchStations = "Не удалось найти станции. Проверьте подключение к интернету."
     override val noStationsFound = "Станции не найдены"

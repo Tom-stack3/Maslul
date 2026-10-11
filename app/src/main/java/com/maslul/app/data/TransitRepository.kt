@@ -495,13 +495,14 @@ class TransitRepository(
     suspend fun stopBoard(stopId: String, now: Instant = Instant.now()): List<BoardEntry> = coroutineScope {
         // Stop times start at the requested time, so a late bus whose timetable slot here has
         // already passed would be missing entirely; fetch the recent past too.
-        val upcoming = async { transitous.stopTimes(stopId, count = 40, language = language) }
+        // The next hour, at least 40: a count alone gives a busy station's lines one time each.
+        val upcoming = async { transitous.stopTimes(stopId, count = 40, language = language, windowSec = 3600) }
         val recent = async {
             // The whole window, however busy the stop: a count alone can end well short of now.
             runCatching { transitous.stopTimes(stopId, now.minusSeconds(LATE_WINDOW_SEC), count = 10, language = language, windowSec = LATE_WINDOW_SEC) }
                 .getOrDefault(emptyList())
         }
-        val deps = mergeDepartures(upcoming.await(), recent.await(), now)
+        val deps = perLine(mergeDepartures(upcoming.await(), recent.await(), now), now)
         val snapshot = live.snapshot()
         boardEntries(deps, snapshot, now)
     }
@@ -726,6 +727,14 @@ class TransitRepository(
                 .filter { it.scheduled.isAfter(now.minusSeconds(LATE_WINDOW_SEC)) }
                 .filter { seen.add(it.tripId + "|" + it.scheduled.epochSecond) }
                 .sortedBy { it.scheduled }
+        }
+
+        /** Rides of each line and direction a board shows: any whose time here has passed (maybe late), and the next [next]. */
+        fun perLine(deps: List<Departure>, now: Instant, next: Int = 3): List<Departure> {
+            val upcoming = HashMap<String, Int>()
+            return deps.filter { d ->
+                !d.scheduled.isAfter(now) || upcoming.merge("${d.routeId}|${d.headsign}", 1, Int::plus)!! <= next
+            }
         }
 
         /**

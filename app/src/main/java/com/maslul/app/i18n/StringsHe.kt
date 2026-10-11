@@ -420,6 +420,7 @@ internal object Hebrew : Strings() {
     override val noLinesNearbyHint = "אפשרו גישה למיקום כדי לראות קווים סביבכם."
     override val lineDetailsUnavailable = "פרטי הקו לא זמינים"
     override fun thenTime(time: String) = "ואז $time"
+    override val showDepartures = "הצגת יציאות"
     override fun nVariants(n: Int) = "$n חלופות"
     override val errSearchStations = "חיפוש התחנות נכשל. בדקו את החיבור לאינטרנט."
     override val noStationsFound = "לא נמצאו תחנות"

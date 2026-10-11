@@ -338,6 +338,7 @@ abstract class Strings {
     abstract val noLinesNearbyHint: String
     abstract val lineDetailsUnavailable: String
     abstract fun thenTime(time: String): String
+    abstract val showDepartures: String
     abstract fun nVariants(n: Int): String
     abstract val errSearchStations: String
     abstract val noStationsFound: String

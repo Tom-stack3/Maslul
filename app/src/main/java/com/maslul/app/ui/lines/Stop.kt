@@ -1,6 +1,19 @@
 package com.maslul.app.ui.lines
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
+import androidx.compose.material3.BottomSheetScaffold
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberStandardBottomSheetState
+import androidx.compose.runtime.rememberCoroutineScope
+import com.maslul.app.ui.components.freshnessColor
+import com.maslul.app.ui.theme.Numeric
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -116,42 +129,69 @@ fun StopScreen(model: StopModel) {
             .sortedBy { it.first.live?.best ?: it.first.departure.scheduled }
     }
 
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        Column(Modifier.fillMaxSize()) {
-            Surface(color = MaterialTheme.colorScheme.surface) {
-                Row(Modifier.statusBarsPadding().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, S.back) }
-                    Column(Modifier.weight(1f)) {
-                        Text(model.place.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        model.place.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = LocalExtra.current.subtle) }
-                    }
-                    IconButton(onClick = model::toggleFavorite) {
-                        Icon(if (fav) Icons.Rounded.Star else Icons.Rounded.StarBorder, S.favoriteStop,
-                            tint = if (fav) Color(0xFFF5A524) else MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Surface(color = MaterialTheme.colorScheme.surface) {
+            Row(Modifier.statusBarsPadding().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { model.nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, S.back) }
+                Column(Modifier.weight(1f)) {
+                    Text(model.place.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    model.place.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = LocalExtra.current.subtle) }
+                }
+                IconButton(onClick = model::toggleFavorite) {
+                    Icon(if (fav) Icons.Rounded.Star else Icons.Rounded.StarBorder, S.favoriteStop,
+                        tint = if (fav) Color(0xFFF5A524) else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            TransitMap(
-                Modifier.fillMaxWidth().height(160.dp),
-                markers = listOf(MapMarker(model.place.point, ModeColors.Bus, MarkerKind.STOP, model.place.stopId)),
-                user = model.location.last.collectAsState().value,
-                initialCenter = model.place.point,
-                initialZoom = 16.0,
-                compassAlignment = Alignment.BottomEnd,
-                compassModifier = Modifier.padding(8.dp),
-            )
-            if (model.loading) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp)) else Spacer(Modifier.height(2.dp))
-            when {
-                model.loading && model.entries.isEmpty() -> LoadingBox(text = S.loadingDepartures)
-                model.error != null -> MessageBox(S.noDepartures, body = model.error, action = S.retry,
-                    onAction = { model.scope.launch { model.refresh() } })
-                groups.isEmpty() -> MessageBox(S.noUpcomingDepartures, body = S.noUpcomingDeparturesHint)
-                else -> LazyColumn(Modifier.fillMaxSize().testTag("stop_board"), contentPadding = PaddingValues(bottom = 96.dp)) {
-                    items(groups, key = { it.key }) { g ->
-                        BoardRow(g, now, onTimeClick = { model.open(g.first, focusVehicle = true) }) { model.open(g.first) }
-                        Hairline(start = 20.dp)
-                    }
-                    item { Spacer(Modifier.navigationBarsPadding()) }
+        }
+        StopBody(model, groups, now)
+    }
+}
+
+/** The map, with the departures in a sheet over it that can be dragged down (or hidden) to enlarge the map, as on a line. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StopBody(model: StopModel, groups: List<BoardGroup>, now: Instant) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val peek = maxHeight * 0.7f
+        val scaffold = rememberBottomSheetScaffoldState(
+            // Dragging the sheet all the way down shows the map on its own.
+            bottomSheetState = rememberStandardBottomSheetState(initialValue = SheetValue.PartiallyExpanded, skipHiddenState = false),
+        )
+        val sheet = scaffold.bottomSheetState
+        val mapOnly = sheet.currentValue == SheetValue.Hidden && sheet.targetValue == SheetValue.Hidden
+        val scope = rememberCoroutineScope()
+        BottomSheetScaffold(
+            scaffoldState = scaffold,
+            sheetPeekHeight = peek,
+            sheetShadowElevation = 12.dp,
+            sheetContainerColor = MaterialTheme.colorScheme.surface,
+            sheetContent = { Departures(model, groups, now) },
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                TransitMap(
+                    Modifier.fillMaxSize(),
+                    markers = listOf(MapMarker(model.place.point, ModeColors.Bus, MarkerKind.STOP, model.place.stopId)),
+                    user = model.location.last.collectAsState().value,
+                    initialCenter = model.place.point,
+                    initialZoom = 16.0,
+                    // The stop stays in the middle of what's in view: above the sheet, or the whole map.
+                    fitPoints = listOf(model.place.point),
+                    fitKey = "${model.place.stopId}-$mapOnly",
+                    contentPadding = PaddingValues(bottom = if (mapOnly) 72.dp else peek),
+                    compassModifier = Modifier.padding(top = 64.dp, end = 12.dp),
+                )
+                FilledTonalIconButton(
+                    onClick = { scope.launch { if (mapOnly) sheet.partialExpand() else sheet.hide() } },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).testTag("stop_map_expand"),
+                ) { Icon(if (mapOnly) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen, if (mapOnly) S.showDepartures else S.expandMap) }
+                if (mapOnly) {
+                    ExtendedFloatingActionButton(
+                        onClick = { scope.launch { sheet.partialExpand() } },
+                        icon = { Icon(Icons.Rounded.ExpandLess, null) },
+                        text = { Text(S.showDepartures) },
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        modifier = Modifier.align(Alignment.BottomStart).navigationBarsPadding().padding(16.dp),
+                    )
                 }
             }
         }
@@ -162,6 +202,26 @@ fun StopScreen(model: StopModel) {
             shape = CircleShape,
             modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(16.dp),
         )
+    }
+}
+
+@Composable
+private fun Departures(model: StopModel, groups: List<BoardGroup>, now: Instant) {
+    Column(Modifier.fillMaxWidth()) {
+        if (model.loading) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp)) else Spacer(Modifier.height(2.dp))
+        when {
+            model.loading && model.entries.isEmpty() -> LoadingBox(text = S.loadingDepartures)
+            model.error != null -> MessageBox(S.noDepartures, body = model.error, action = S.retry,
+                onAction = { model.scope.launch { model.refresh() } })
+            groups.isEmpty() -> MessageBox(S.noUpcomingDepartures, body = S.noUpcomingDeparturesHint)
+            else -> LazyColumn(Modifier.fillMaxWidth().testTag("stop_board"), contentPadding = PaddingValues(bottom = 96.dp)) {
+                items(groups, key = { it.key }) { g ->
+                    BoardRow(g, now, onTimeClick = { model.open(g.first, focusVehicle = true) }) { model.open(g.first) }
+                    Hairline(start = 20.dp)
+                }
+                item { Spacer(Modifier.navigationBarsPadding()) }
+            }
+        }
     }
 }
 
@@ -178,9 +238,9 @@ private fun BoardRow(g: BoardGroup, now: Instant, onTimeClick: () -> Unit, onCli
         Column(Modifier.weight(1f)) {
             Text(d.headsign, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val later = g.entries.drop(1).take(2).joinToString("  ") { Fmt.time(it.live?.best ?: it.departure.scheduled) }
-            Text(listOfNotNull(d.stop.platformLabel, d.agency, later.takeIf { it.isNotBlank() }?.let { S.thenTime(it) }).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1)
+            listOfNotNull(d.stop.platformLabel, d.agency).joinToString(" · ").takeIf { it.isNotBlank() }?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
         Spacer(Modifier.width(8.dp))
         val live = g.first.live
@@ -202,6 +262,16 @@ private fun BoardRow(g: BoardGroup, now: Instant, onTimeClick: () -> Unit, onCli
                 else -> if (t.epochSecond - now.epochSecond < 3600) Fmt.time(t) else S.scheduledLower
             }
             Text(sub, style = MaterialTheme.typography.labelSmall, color = x.subtle)
+            // And the one after it, live when tracked.
+            g.entries.getOrNull(1)?.let { e ->
+                val next = e.live?.takeIf { it.status == LiveStatus.LIVE }
+                Text(
+                    S.thenTime(Fmt.relative(next?.best ?: e.departure.scheduled, now)),
+                    style = MaterialTheme.typography.labelMedium.merge(Numeric),
+                    color = if (next != null) freshnessColor(next.freshness(now)) else x.subtle,
+                    modifier = Modifier.padding(top = 2.dp).testTag("next_arrival"),
+                )
+            }
         }
     }
 }

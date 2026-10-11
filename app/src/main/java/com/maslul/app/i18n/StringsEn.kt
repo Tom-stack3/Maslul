@@ -398,6 +398,7 @@ internal object English : Strings() {
     override val noLinesNearbyHint = "Allow location access to see lines around you."
     override val lineDetailsUnavailable = "Line details unavailable"
     override fun thenTime(time: String) = "then $time"
+    override val showDepartures = "Show departures"
     override fun nVariants(n: Int) = "$n variants"
     override val errSearchStations = "Couldn't search stations. Check your connection."
     override val noStationsFound = "No stations found"

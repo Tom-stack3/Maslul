@@ -161,7 +161,10 @@ class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: P
     fun live(i: Int): LiveCall? = itinerary.legs.getOrNull(i)?.takeIf { it.mode.isTransit }?.let { rideLive[it.rideKey] }
 
     /** The trip as the rides are expected to run (late ones included): what its times show. */
-    fun expected(): Itinerary = Combine.expected(itinerary) { rideLive[it.rideKey] }
+    fun expected(): Itinerary = Combine.expected(itinerary, riding) { rideLive[it.rideKey] }
+
+    /** The trip the user is on, when planning from it. */
+    val riding: String? get() = from.tripId.takeIf { from.kind == PlaceKind.ON_BOARD }
 
     /** A tight connection onto [leg], if the previous vehicle (as expected to run) leaves little spare time. */
     fun tightTransferInto(leg: Leg) =
@@ -510,6 +513,8 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
         else -> RailSpec(Rail.SOLID, lineColor(l))
     }
     val onSurface = MaterialTheme.colorScheme.onSurface
+    // Getting off the last ride right where you're going: that stop is the destination, with one time.
+    val endsOnRide = legs.last().mode.isTransit
 
     Column {
         // Origin
@@ -535,42 +540,54 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
                 val rail = RailSpec(Rail.SOLID, c)
                 val prev = legs.getOrNull(i - 1)
                 val live = model.live(i)
+                val ridden = leg.tripId != null && leg.tripId == model.riding
                 // Boarding
                 TimelineRow(
                     above = prev?.let(::railOf),
                     below = rail,
                     node = Node.STOP,
                     nodeColor = c,
-                    time = { TimeText(leg.start, live?.takeIf { it.status == LiveStatus.LIVE }?.let { it.expected }, live.freshness(now)) },
+                    // Riding it already: when it was there, as early or late as it's running.
+                    time = {
+                        TimeText(leg.start, live?.takeIf { it.status == LiveStatus.LIVE }?.let { it.expected }
+                            ?: live?.takeIf { ridden && it.status == LiveStatus.PASSED }?.let { expected.legs[i].start }, live.freshness(now))
+                    },
                 ) {
                     Text(leg.from.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
-                    if (leg.tripId != null && leg.tripId == model.from.tripId) {
+                    if (ridden) {
                         Text(S.youreOnThis(leg.mode), style = MaterialTheme.typography.bodySmall, color = x.subtle)
                     }
                     leg.from.platformLabel?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = x.subtle) }
                     model.tightTransferInto(leg)?.let { TransferWarning(it, modifier = Modifier.padding(top = 4.dp)) }
                 }
                 TransitSegment(model, i, leg, rail, live, now)
-                // Alighting
+                // Alighting: when it's expected to get in, as the header and the rest of the trip have it.
                 val next = legs.getOrNull(i + 1)
+                val liveEnd = live?.takeIf { it.status == LiveStatus.LIVE || ridden && it.status == LiveStatus.PASSED }
+                    ?.let { expected.legs[i].end }
+                val last = next == null
                 TimelineRow(
                     above = rail,
                     below = next?.let(::railOf),
-                    node = Node.STOP,
-                    nodeColor = c,
-                    time = { TimeText(leg.end, live?.alightExpected, live.freshness(now)) },
+                    node = if (last) Node.TERMINUS else Node.STOP,
+                    nodeColor = if (last) MaterialTheme.colorScheme.primary else c,
+                    time = { TimeText(leg.end, liveEnd, live.freshness(now)) },
+                    modifier = if (last) Modifier.testTag("destination_row") else Modifier,
                 ) {
                     Text(leg.to.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
-                    Text(S.getOff, style = MaterialTheme.typography.bodySmall, color = x.subtle)
+                    val where = if (!last) null else model.to.name.takeIf { it != leg.to.name } ?: model.to.subtitle
+                    Text(listOfNotNull(S.getOff, where).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = x.subtle)
                     Spacer(Modifier.height(8.dp))
                 }
             }
         }
-        // Destination
-        TimelineRow(railOf(legs.last()), null, Node.TERMINUS, MaterialTheme.colorScheme.primary,
-            time = { TimeText(expected.end) }) {
-            Text(model.to.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
-            model.to.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = x.subtle) }
+        // Destination, after a walk (or a lift) from the last stop.
+        if (!endsOnRide) {
+            TimelineRow(railOf(legs.last()), null, Node.TERMINUS, MaterialTheme.colorScheme.primary,
+                time = { TimeText(expected.end) }, modifier = Modifier.testTag("destination_row")) {
+                Text(model.to.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
+                model.to.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = x.subtle) }
+            }
         }
     }
 }

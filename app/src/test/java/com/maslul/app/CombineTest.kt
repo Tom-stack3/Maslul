@@ -400,4 +400,22 @@ class CombineTest {
         assertFalse(e.legs[3].start.isBefore(e.legs[2].end))
         assertEquals(at(43), e.end)
     }
+
+    @Test
+    fun theRideYoureOnArrivesWhenItsExpectedTo() {
+        // On board a tram running 5 min early: it passed where you're planning from, and gets in at 25, not 30.
+        val ride = bus("1", "A", 0.0, "B", 5.0, 10, 30)
+        val itin = itin("board", ride)
+        val passed = LiveCall(LiveStatus.PASSED, ride.start, null, delaySec = -300, alightExpected = at(25))
+        val e = Combine.expected(itin, riding = ride.tripId) { passed }
+        assertEquals(at(5), e.start)
+        assertEquals(at(25), e.end)
+        assertEquals(e.end, e.legs.single().end)
+        // Without a predicted arrival, it's as early or late as it's running.
+        val noArrival = passed.copy(alightExpected = null)
+        assertEquals(at(25), Combine.expected(itin, riding = ride.tripId) { noArrival }.end)
+        // A bus that passed which you're not on says nothing about the trip.
+        assertSame(itin, Combine.expected(itin) { passed })
+        assertSame(itin, Combine.expected(itin, riding = "another") { passed })
+    }
 }

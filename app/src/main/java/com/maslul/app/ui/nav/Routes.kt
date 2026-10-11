@@ -497,7 +497,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
                 val keep = itin.legs.indices.filter { board != null && itin.legs[it].tripId == board }.toSet()
                 Combine.pickBest(itin, now, liveOf, keep)
             })
-                .sortedBy { Ranking.score(Combine.expected(it, liveOf), false, walkMps, rail) }
+                .sortedBy { Ranking.score(Combine.expected(it, board, liveOf), false, walkMps, rail) }
         }
         itineraries.forEach { itin -> itin.firstTransit?.let { rideLive[it.rideKey] }?.let { live[itin.id] = it } }
     }
@@ -625,7 +625,7 @@ fun RoutesScreen(model: RoutesModel) {
         onDispose { lifecycle.removeObserver(obs) }
     }
 
-    val expectedOf = { itin: Itinerary -> Combine.expected(itin) { model.rideLive[it.rideKey] } }
+    val expectedOf = { itin: Itinerary -> Combine.expected(itin, model.onBoardTripId) { model.rideLive[it.rideKey] } }
     // Leaving now: options whose connection a late bus has made impossible aren't options (unless nothing else is left).
     val itineraries = if (model.timeMode != TimeMode.NOW) model.itineraries
         else model.itineraries.filter { Combine.connects(it, now) { l -> model.rideLive[l.rideKey] } }.ifEmpty { model.itineraries }
@@ -866,7 +866,7 @@ fun ItineraryCard(
     val liveOf: (Leg) -> LiveCall? = { o -> if (o.rideKey == first?.rideKey) live else rideLive[o.rideKey] }
     // Times follow the live vehicles: "leave in" the first one, arrival with the last one, so a late
     // bus in the plan doesn't leave the times on its timetable slot.
-    val expected = Combine.expected(itin, liveOf)
+    val expected = Combine.expected(itin, onBoardTripId, liveOf)
     val leaveAt = expected.start
     val endAt = expected.end
 
@@ -949,7 +949,7 @@ fun ItineraryCard(
                 if (stayOn) {
                     val then = itin.transitLegs.getOrNull(1)
                     HintLine(modeIcon(first.mode), S.stayOnUntil(first.to.name),
-                        S.getOffAt(Fmt.time(Combine.arrives(first, live))) +
+                        S.getOffAt(Fmt.time(expected.legs.getOrNull(itin.legs.indexOf(first))?.end ?: first.end)) +
                             (then?.let { " · " + S.thenRide(rideName(it)) } ?: first.to.platformLabel?.let { " · $it" } ?: ""))
                 } else {
                     // Where the next ride boards (it may be a stop next to the one you get off at), at its expected time.

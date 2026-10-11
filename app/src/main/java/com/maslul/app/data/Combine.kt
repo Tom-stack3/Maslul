@@ -169,14 +169,22 @@ object Combine {
      * and arrive, with the walks moving along (also after a ride was switched to another bus, which
      * leaves the walk between rides on the old one's times). The legs keep the timetable; this is
      * what to show (times, duration, transfer slack) once a late bus is in the plan.
+     * The trip being [riding] has passed where it was boarded, but still runs as early or late as it
+     * is: from there, and in when it's expected to.
      */
-    fun expected(itin: Itinerary, liveOf: (Leg) -> LiveCall?): Itinerary {
+    fun expected(itin: Itinerary, riding: String? = null, liveOf: (Leg) -> LiveCall?): Itinerary {
         val legs = itin.legs.toMutableList()
         val transit = legs.indices.filter { legs[it].mode.isTransit }
         if (transit.isEmpty()) return itin
         for (i in transit) {
             val l = legs[i]
-            val c = liveOf(l)?.takeIf { it.status == LiveStatus.LIVE } ?: continue
+            val call = liveOf(l)
+            if (call?.status == LiveStatus.PASSED && riding != null && l.tripId == riding) {
+                val end = call.alightExpected ?: l.end.plusSeconds(call.delaySec)
+                legs[i] = l.copy(start = minOf(l.start.plusSeconds(call.delaySec), end), end = end)
+                continue
+            }
+            val c = call?.takeIf { it.status == LiveStatus.LIVE } ?: continue
             val s = boards(l, c)
             legs[i] = l.copy(start = s, end = maxOf(arrives(l, c), s))
         }

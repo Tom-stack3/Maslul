@@ -512,6 +512,8 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
         TransitMode.CAR -> carRail
         else -> RailSpec(Rail.SOLID, lineColor(l))
     }
+    // Changing straight from one ride to the next: the rail between them is the change, not either line.
+    fun between(a: Leg?, b: Leg?) = if (a != null && b != null && a.mode.isTransit && b.mode.isTransit) walkRail else (a ?: b)?.let(::railOf)
     val onSurface = MaterialTheme.colorScheme.onSurface
     // Getting off the last ride right where you're going: that stop is the destination, with one time.
     val endsOnRide = legs.last().mode.isTransit
@@ -543,7 +545,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
                 val ridden = leg.tripId != null && leg.tripId == model.riding
                 // Boarding
                 TimelineRow(
-                    above = prev?.let(::railOf),
+                    above = if (prev == null) rail else between(prev, leg),
                     below = rail,
                     node = Node.STOP,
                     nodeColor = c,
@@ -568,7 +570,7 @@ private fun JourneyTimeline(model: RouteDetailModel, now: Instant) {
                 val last = next == null
                 TimelineRow(
                     above = rail,
-                    below = next?.let(::railOf),
+                    below = next?.let { between(leg, it) },
                     node = if (last) Node.TERMINUS else Node.STOP,
                     nodeColor = if (last) MaterialTheme.colorScheme.primary else c,
                     time = { TimeText(leg.end, liveEnd, live.freshness(now)) },

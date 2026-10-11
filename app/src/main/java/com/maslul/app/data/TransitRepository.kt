@@ -324,8 +324,9 @@ class TransitRepository(
             async {
                 val d = GeoMath.distance(here, st.point)
                 runCatching {
+                    // With each ride's next stop: its direction, at a stop both directions share.
                     transitous.stopTimes(st.stopId!!, now.minusSeconds(OnBoard.BEFORE_SEC), count = 40, language = language,
-                        windowSec = OnBoard.BEFORE_SEC + OnBoard.AFTER_SEC)
+                        windowSec = OnBoard.BEFORE_SEC + OnBoard.AFTER_SEC, fetchStops = true)
                 }.getOrDefault(emptyList()).map { d to it }
             }
         }.awaitAll().flatten()
@@ -342,7 +343,7 @@ class TransitRepository(
         val tracked = loose.mapNotNull { v ->
             val r = routes[v.lineRef] ?: return@mapNotNull null
             BoardCandidate(null, v.lineRef, r.label, r.mode, OnBoard.placeName(r.destination), r.agency, r.operatorRef.toString(), null, v,
-                GeoMath.distance(here, v.point))
+                GeoMath.distance(here, v.point), bearing = v.bearing)
         }
         OnBoard.rank(timetabled + tracked, now)
     }

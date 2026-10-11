@@ -365,9 +365,10 @@ internal object Hebrew : Strings() {
     override val noRidesAroundHint = "נסיעות מופיעות כאן כשאתם באוטובוס או ברכבת, או בתחנה שאחד מהם אמור להגיע אליה."
     override val nothingMatchesRides = "אין התאמות. נקו את הסינון כדי לראות את כל הנסיעות סביבכם."
     override val onBoardFooter = "אוטובוסים בזמן אמת הקרובים אליכם מופיעים ראשונים. אחרי שבוחרים, המסלול מתוכנן מהתחנה הבאה: " +
-        "להישאר, או איפה לרדת ולהחליף."
+        "להישאר, או איפה לרדת ולהחליף. נסיעות בכיוון ההפוך מכם מופיעות בסוף."
     override fun liveFromYou(distance: String) = "בזמן אמת · $distance מכם"
     override fun dueAt(stop: String) = "צפוי ב־$stop"
+    override val otherWay = "בכיוון ההפוך"
     override val timetableWord = "לוח זמנים"
 
     // ---- Shuttles ------------------------------------------------------------------------

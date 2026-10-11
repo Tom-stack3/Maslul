@@ -288,6 +288,7 @@ abstract class Strings {
     abstract val onBoardFooter: String
     abstract fun liveFromYou(distance: String): String
     abstract fun dueAt(stop: String): String
+    abstract val otherWay: String
     abstract val timetableWord: String
 
     // ---- Shuttles ---------------------------------------------------------------------------

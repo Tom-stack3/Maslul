@@ -110,6 +110,9 @@ object GeoMath {
         val x = cos(φ1) * sin(φ2) - sin(φ1) * cos(φ2) * cos(dλ)
         return ((Math.toDegrees(atan2(y, x)) + 360) % 360).toFloat()
     }
+
+    /** Smallest signed difference a − b between two compass angles, in −180..180. */
+    fun angleDiff(a: Float, b: Float): Float = (((a - b) % 360f + 540f) % 360f) - 180f
 }
 
 /**

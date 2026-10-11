@@ -13,6 +13,7 @@ import androidx.compose.ui.test.swipeUp
 import org.junit.Assert.assertEquals
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -72,6 +73,47 @@ class AppFlowTest {
         if (soonest in 2..85) {
             rule.waitUntil(20_000) { rule.onAllNodes(hasText("leave in", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         }
+    }
+
+    private fun scrolled(tag: String) =
+        rule.onNodeWithTag(tag).fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].let { it.value() to it.maxValue() }
+
+    @Test
+    fun aRoutesDetailsScrollToTheDestination() {
+        planTo("haifa center", "Haifa Center HaShemona")
+        rule.waitUntil(60_000) { rule.onAllNodes(hasText(" – ", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        rule.onAllNodes(hasText(" – ", substring = true))[0].performClick()
+        rule.waitUntil(20_000) { rule.onAllNodes(hasTestTag("route_detail")).fetchSemanticsNodes().isNotEmpty() }
+        // Every ride's stops listed, for a timeline longer than the screen.
+        rule.onAllNodes(hasText("stops · ", substring = true)).fetchSemanticsNodes().indices.forEach { i ->
+            rule.onAllNodes(hasText("stops · ", substring = true))[i].performScrollTo().performClick()
+        }
+        // Open the sheet all the way, then flick the list: it keeps going after the finger lifts.
+        rule.onNodeWithTag("route_detail").performTouchInput { swipeUp(startY = bottom - 50f, endY = top + 50f, durationMillis = 400) }
+        rule.onNodeWithTag("route_detail").performScrollToIndex(0)
+        rule.waitForIdle()
+        val before = scrolled("route_detail").first
+        rule.onNodeWithTag("route_detail").performTouchInput { swipeUp(startY = centerY + 150f, endY = centerY - 150f, durationMillis = 60) }
+        rule.waitForIdle()
+        val (after, max) = scrolled("route_detail")
+        assertTrue("a 300 px flick scrolled ${after - before} px (of $max)", after - before > 450f || after >= max)
+        // And a few more reach the end, with the destination in view.
+        repeat(6) {
+            rule.onNodeWithTag("route_detail").performTouchInput { swipeUp(startY = centerY + 150f, endY = centerY - 150f, durationMillis = 60) }
+        }
+        rule.waitForIdle()
+        val (end, endMax) = scrolled("route_detail")
+        assertEquals(endMax, end, 1f)
+        // All of it, above the navigation bar: the list doesn't end short of its content.
+        val row = rule.onNodeWithTag("destination_row").fetchSemanticsNode().boundsInRoot
+        val list = rule.onNodeWithTag("route_detail").fetchSemanticsNode().boundsInRoot
+        assertTrue("destination $row runs past the list $list", row.bottom <= list.bottom)
+        // Every ride still says how long it is (a row cut short lost this line).
+        val rideLines = Regex("""^Ride \d+ stops? · """)
+        assertEquals(rule.onAllNodes(hasText("Get off", substring = true)).fetchSemanticsNodes().size,
+            rule.onAllNodes(hasText("Ride ", substring = true)).fetchSemanticsNodes().count { n ->
+                n.config.getOrElseNullable(SemanticsProperties.Text) { null }?.joinToString("")?.let(rideLines::containsMatchIn) == true
+            })
     }
 
     @Test

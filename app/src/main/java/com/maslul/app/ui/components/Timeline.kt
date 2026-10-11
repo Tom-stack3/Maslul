@@ -4,9 +4,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -22,6 +21,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 
 enum class Rail { NONE, SOLID, DOTTED, FADED }
@@ -47,43 +47,47 @@ fun TimelineRow(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val surface = MaterialTheme.colorScheme.surface
-    Row(modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+    // The rail is drawn behind the whole row, as tall as its content turns out. Sizing the row by
+    // its intrinsic height instead cut rows short when something in them wraps (the rides after a
+    // missed one), hiding what came after and ending the list's scrolling before its end.
+    Row(
+        modifier.fillMaxWidth().drawBehind {
+            val x = (timeWidth.coerceAtLeast(0.dp) + 15.dp).toPx()
+            val cx = if (layoutDirection == LayoutDirection.Rtl) size.width - x else x
+            val ny = nodeY.toPx()
+            above?.let { drawRail(it, cx, 0f, if (node == Node.NONE) size.height else ny) }
+            below?.let { drawRail(it, cx, if (node == Node.NONE) 0f else ny, size.height) }
+            when (node) {
+                Node.NONE -> Unit
+                Node.SMALL -> {
+                    drawCircle(surface, 4.dp.toPx(), Offset(cx, ny))
+                    drawCircle(nodeColor, 4.dp.toPx(), Offset(cx, ny), style = Stroke(2.dp.toPx()))
+                }
+                Node.STOP -> {
+                    drawCircle(surface, 7.dp.toPx(), Offset(cx, ny))
+                    drawCircle(nodeColor, 6.dp.toPx(), Offset(cx, ny), style = Stroke(3.dp.toPx()))
+                }
+                Node.TERMINUS -> {
+                    drawCircle(nodeColor, 8.dp.toPx(), Offset(cx, ny))
+                    drawCircle(surface, 3.dp.toPx(), Offset(cx, ny))
+                }
+                Node.ENDPOINT -> {
+                    drawCircle(nodeColor, 8.dp.toPx(), Offset(cx, ny))
+                    drawCircle(surface, 3.5.dp.toPx(), Offset(cx, ny))
+                }
+                Node.VEHICLE -> {
+                    drawCircle(surface, 9.dp.toPx(), Offset(cx, ny))
+                    drawCircle(nodeColor, 7.dp.toPx(), Offset(cx, ny))
+                }
+            }
+        },
+    ) {
         if (timeWidth > 0.dp) {
             Box(Modifier.width(timeWidth).padding(start = 14.dp, top = nodeY - 10.dp), contentAlignment = Alignment.TopStart) {
                 time?.invoke(this)
             }
         }
-        Box(
-            Modifier.width(30.dp).fillMaxHeight().drawBehind {
-                val cx = size.width / 2
-                val ny = nodeY.toPx()
-                above?.let { drawRail(it, cx, 0f, if (node == Node.NONE) size.height else ny) }
-                below?.let { drawRail(it, cx, if (node == Node.NONE) 0f else ny, size.height) }
-                when (node) {
-                    Node.NONE -> Unit
-                    Node.SMALL -> {
-                        drawCircle(surface, 4.dp.toPx(), Offset(cx, ny))
-                        drawCircle(nodeColor, 4.dp.toPx(), Offset(cx, ny), style = Stroke(2.dp.toPx()))
-                    }
-                    Node.STOP -> {
-                        drawCircle(surface, 7.dp.toPx(), Offset(cx, ny))
-                        drawCircle(nodeColor, 6.dp.toPx(), Offset(cx, ny), style = Stroke(3.dp.toPx()))
-                    }
-                    Node.TERMINUS -> {
-                        drawCircle(nodeColor, 8.dp.toPx(), Offset(cx, ny))
-                        drawCircle(surface, 3.dp.toPx(), Offset(cx, ny))
-                    }
-                    Node.ENDPOINT -> {
-                        drawCircle(nodeColor, 8.dp.toPx(), Offset(cx, ny))
-                        drawCircle(surface, 3.5.dp.toPx(), Offset(cx, ny))
-                    }
-                    Node.VEHICLE -> {
-                        drawCircle(surface, 9.dp.toPx(), Offset(cx, ny))
-                        drawCircle(nodeColor, 7.dp.toPx(), Offset(cx, ny))
-                    }
-                }
-            },
-        )
+        Spacer(Modifier.width(30.dp))
         Column(Modifier.weight(1f).padding(start = 6.dp, end = 16.dp), content = content)
     }
 }

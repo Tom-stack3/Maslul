@@ -16,7 +16,7 @@ object Fmt {
      * [a] then [b] with the arrow between, each name kept to itself: Hebrew names on both sides
      * of an English "→" would otherwise run together right to left, and read backwards.
      */
-    fun fromTo(a: String, b: String): String = "⁨$a⁩ ${S.arrow} ⁨$b⁩"
+    fun fromTo(a: String, b: String): String = "\u2068$a\u2069 ${S.arrow} \u2068$b\u2069"
 
     /** "Now", "4 min", or "21:40" once more than an hour away. */
     fun relative(t: Instant, now: Instant): String {

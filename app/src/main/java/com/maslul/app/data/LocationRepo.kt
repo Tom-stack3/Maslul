@@ -4,7 +4,9 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Location
 import android.os.Looper
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -28,6 +30,24 @@ class LocationRepo(private val context: Context) {
     /** Most recent known position, or null before the first fix. */
     val last: StateFlow<GeoPoint?> = _last.asStateFlow()
 
+    /** Recent fixes, oldest first, for the way you're moving. */
+    private val fixes = ArrayDeque<Motion.Fix>()
+
+    private fun record(l: Location) {
+        val f = Motion.Fix(
+            GeoPoint(l.latitude, l.longitude), l.elapsedRealtimeNanos / 1_000_000,
+            l.bearing.takeIf { l.hasBearing() }, l.speed.takeIf { l.hasSpeed() }, l.accuracy.takeIf { l.hasAccuracy() },
+        )
+        synchronized(fixes) {
+            if (fixes.lastOrNull()?.atMs?.let { it >= f.atMs } == true) return
+            fixes.addLast(f)
+            while (fixes.size > 2 && f.atMs - fixes.first().atMs > Motion.KEEP_MS) fixes.removeFirst()
+        }
+    }
+
+    /** Which way you're moving, in degrees from north; null when still or not known (see [Motion.heading]). */
+    fun heading(): Float? = Motion.heading(synchronized(fixes) { fixes.toList() }, SystemClock.elapsedRealtime())
+
     fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -39,7 +59,7 @@ class LocationRepo(private val context: Context) {
             suspendCancellableCoroutine { cont ->
                 val cts = CancellationTokenSource()
                 client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token)
-                    .addOnSuccessListener { cont.resume(it?.let { l -> GeoPoint(l.latitude, l.longitude) }) }
+                    .addOnSuccessListener { cont.resume(it?.let { l -> record(l); GeoPoint(l.latitude, l.longitude) }) }
                     .addOnFailureListener { cont.resume(null) }
                 cont.invokeOnCancellation { cts.cancel() }
             }
@@ -62,6 +82,7 @@ class LocationRepo(private val context: Context) {
         val cb = object : LocationCallback() {
             override fun onLocationResult(r: LocationResult) {
                 r.lastLocation?.let {
+                    record(it)
                     val p = GeoPoint(it.latitude, it.longitude)
                     _last.value = p
                     trySend(p)
@@ -75,5 +96,43 @@ class LocationRepo(private val context: Context) {
     companion object {
         /** Used when location is unavailable: Tel Aviv Savidor Center. */
         val DEFAULT = GeoPoint(32.0840, 34.7980)
+    }
+}
+
+/** Which way you're moving, from recent location fixes. */
+object Motion {
+    class Fix(val point: GeoPoint, val atMs: Long, val bearing: Float?, val speedMps: Float?, val accuracyM: Float? = null)
+
+    const val KEEP_MS = 3 * 60_000L
+    /** An older fix than this says nothing about now. */
+    private const val FRESH_MS = 60_000L
+    /** A fix's own bearing counts from this speed: below it, it's mostly noise. */
+    private const val MOVING_MPS = 2f
+    /**
+     * Fixes this far apart (and twice their uncertainty, at least walking speed) show where
+     * you're heading, when the last one has no bearing.
+     */
+    private const val APART_M = 80.0
+    private const val SINCE_MS = 2 * 60_000L
+    /** Faster than any train here (160 km/h): a fix that jumped, not movement. */
+    private const val MAX_MPS = 50.0
+
+    /**
+     * Degrees from north, or null: the latest fix's own bearing when it's moving, else from an
+     * earlier fix far enough back (a train stopped at a station still came from somewhere).
+     * Fixes jumping about while you stand still are too slow apart to count, and one that jumped
+     * far (a cell tower's position underground) too fast.
+     */
+    fun heading(fixes: List<Fix>, nowMs: Long): Float? {
+        val last = fixes.lastOrNull()?.takeIf { nowMs - it.atMs <= FRESH_MS } ?: return null
+        if (last.bearing != null && (last.speedMps ?: 0f) >= MOVING_MPS) return last.bearing
+        for (f in fixes.asReversed()) {
+            if (last.atMs - f.atMs > SINCE_MS) break
+            val d = GeoMath.distance(f.point, last.point)
+            val sec = (last.atMs - f.atMs) / 1000.0
+            val fuzz = 2.0 * ((f.accuracyM ?: 0f) + (last.accuracyM ?: 0f))
+            if (d >= maxOf(APART_M, fuzz) && sec > 0 && d / sec in 1.2..MAX_MPS) return GeoMath.bearing(f.point, last.point)
+        }
+        return null
     }
 }

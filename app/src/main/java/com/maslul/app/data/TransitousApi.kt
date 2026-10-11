@@ -142,7 +142,11 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
 
     /** Upcoming departures at a stop. */
     /** Departures from [stopId]: at least [count], and all of those within [windowSec] of [time] when given. */
-    suspend fun stopTimes(stopId: String, time: Instant? = null, count: Int = 30, language: String? = null, windowSec: Long? = null): List<Departure> {
+    /** Departures from [stopId]; with [fetchStops], each knows its trip's next stop (a bigger answer). */
+    suspend fun stopTimes(
+        stopId: String, time: Instant? = null, count: Int = 30, language: String? = null, windowSec: Long? = null,
+        fetchStops: Boolean = false,
+    ): List<Departure> {
         val url = base.toHttpUrl().newBuilder()
             .addPathSegments("api/v6/stoptimes")
             .addQueryParameter("stopId", stopId)
@@ -151,6 +155,7 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
                 time?.let { addQueryParameter("time", queryTime(it)) }
                 windowSec?.let { addQueryParameter("window", it.toString()) }
                 language?.let { addQueryParameter("language", it) }
+                if (fetchStops) addQueryParameter("fetchStops", "true")
             }
             .build()
         return Http.getJson<StopTimesDto>(url).stopTimes.mapNotNull { it.toDomain() }
@@ -417,6 +422,8 @@ class StopTimeDto(
     val routeColor: String? = null,
     val cancelled: Boolean = false,
     val tripCancelled: Boolean = false,
+    /** The trip's stops after this one, when asked for. */
+    val nextStops: List<PlaceDto>? = null,
 ) {
     fun toDomain(): Departure? {
         if (cancelled || tripCancelled) return null
@@ -436,6 +443,7 @@ class StopTimeDto(
             scheduled = time,
             stop = call,
             agencyId = agencyId,
+            next = nextStops?.firstOrNull()?.toStopCall(),
         )
     }
 }

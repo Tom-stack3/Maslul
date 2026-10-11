@@ -2,12 +2,14 @@ package com.maslul.app
 
 import com.maslul.app.data.Departure
 import com.maslul.app.data.GeoPoint
+import com.maslul.app.data.Motion
 import com.maslul.app.data.OnBoard
 import com.maslul.app.data.StopCall
 import com.maslul.app.data.TransitMode
 import com.maslul.app.data.TripTimeline
 import com.maslul.app.data.Vehicle
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -142,5 +144,76 @@ class OnBoardTest {
     fun aTrainSignedWithItsNumberHasNoDestination() {
         assertEquals("", OnBoard.placeName("785"))
         assertEquals("Haifa", OnBoard.placeName("Haifa"))
+    }
+
+    /** A light rail stopping at [stop], due at [due], whose next stop is [nextKm] along (north is +, south is −). */
+    private fun tram(trip: String, headsign: String, due: Instant, nextKm: Double) = departure(trip, "1", due).copy(
+        mode = TransitMode.LIGHT_RAIL, headsign = headsign,
+        next = StopCall("n", "Next", null, p(0.2 + nextKm).lat, 34.8, null, due.plusSeconds(120)),
+    )
+
+    @Test
+    fun ridesGoingTheOtherWayComeLast() {
+        // Both directions stop here minutes apart; the one going south is due sooner.
+        val south = "20261005_10:00_il-Israel-MOT_11_051026"
+        val north = "20261005_10:00_il-Israel-MOT_12_051026"
+        val deps = listOf(
+            200.0 to tram(south, "Bat Yam", at(-1), -1.0),
+            200.0 to tram(north, "Petah Tikva", at(-3), 1.0),
+        )
+        val found = OnBoard.fromDepartures(p(0.0), deps, emptyMap(), now)
+        assertEquals(0f, found.first { it.tripId == north }.bearing!!, 1f)
+        assertEquals("Next", found.first().nextStopName)
+        // Not knowing which way you're going: the nearest in time first, as before.
+        assertEquals(south, OnBoard.rank(found, now).first().tripId)
+        // Heading north: the northbound one, and the other is marked as going the other way.
+        val ranked = OnBoard.rank(found, now, heading = 10f)
+        assertEquals(listOf(north, south), ranked.map { it.tripId })
+        assertTrue(OnBoard.against(ranked.last(), 10f))
+        assertFalse(OnBoard.against(ranked.first(), 10f))
+        // Heading south it's the other way round; a ride whose direction isn't known is never "the other way".
+        assertEquals(listOf(south, north), OnBoard.rank(found, now, heading = 185f).map { it.tripId })
+        assertFalse(OnBoard.against(found.first().copy(bearing = null), 185f))
+    }
+
+    @Test
+    fun aLiveVehicleGoesTheWayItsHeading() {
+        val trip = "20261005_10:00_il-Israel-MOT_1001_051026"
+        val v = vehicle(0.3).copy(bearing = 180f)
+        val c = OnBoard.fromDepartures(p(0.0), listOf(200.0 to departure(trip, "100", at(-2))), mapOf("100" to listOf(v)), now).single()
+        assertEquals(180f, c.bearing!!, 0.1f)
+        assertTrue(OnBoard.against(c, 0f))
+        // A live vehicle going the other way still comes after a timetable ride going yours.
+        val mine = c.copy(tripId = "mine", vehicle = null, bearing = 0f)
+        assertEquals(listOf("mine", trip), OnBoard.rank(listOf(c, mine), now, heading = 0f).map { it.tripId })
+    }
+
+    private fun fix(km: Double, sec: Long, bearing: Float? = null, speed: Float? = null, accuracy: Float? = 10f) =
+        Motion.Fix(p(km), sec * 1000, bearing, speed, accuracy)
+
+    @Test
+    fun headingFromTheFixesBearingWhenMoving() {
+        assertEquals(90f, Motion.heading(listOf(fix(0.0, 100, 90f, 12f)), 105_000)!!, 0.1f)
+        // Standing still, a fix's bearing is noise.
+        assertNull(Motion.heading(listOf(fix(0.0, 100, 90f, 0.5f)), 105_000))
+        // An old fix says nothing about now.
+        assertNull(Motion.heading(listOf(fix(0.0, 100, 90f, 12f)), 200_000))
+        assertNull(Motion.heading(emptyList(), 0))
+    }
+
+    @Test
+    fun headingFromWhereYouWereWhenTheFixHasNone() {
+        // 600 m north over a minute, now stopped at a station: still heading north.
+        val moving = listOf(fix(0.0, 0), fix(0.3, 30), fix(0.6, 60), fix(0.6, 90, speed = 0f))
+        assertEquals(0f, Motion.heading(moving, 95_000)!!, 1f)
+        // Southward the same way.
+        assertEquals(180f, Motion.heading(listOf(fix(0.6, 0), fix(0.0, 60)), 65_000)!!, 1f)
+        // Fixes jumping about within their own uncertainty (underground) aren't movement.
+        val jitter = listOf(fix(0.0, 0, accuracy = 80f), fix(0.15, 20, accuracy = 80f))
+        assertNull(Motion.heading(jitter, 25_000))
+        // Nor is a fix that jumped 2 km in 10 s (a cell tower's position, underground).
+        assertNull(Motion.heading(listOf(fix(0.0, 20), fix(2.0, 30)), 32_000))
+        // Nor is drifting slower than walking pace.
+        assertNull(Motion.heading(listOf(fix(0.0, 0), fix(0.1, 110)), 115_000))
     }
 }

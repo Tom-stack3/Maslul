@@ -16,11 +16,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import com.maslul.app.data.GeoMath
 import com.maslul.app.data.GeoPoint
 import kotlin.math.abs
 
 /** Smallest signed difference a − b between two compass angles, in −180..180. */
-fun angleDiff(a: Float, b: Float): Float = ((a - b + 540f) % 360f) - 180f
+fun angleDiff(a: Float, b: Float): Float = GeoMath.angleDiff(a, b)
 
 /**
  * Which way the phone points, in degrees clockwise from true north, while [enabled]; null

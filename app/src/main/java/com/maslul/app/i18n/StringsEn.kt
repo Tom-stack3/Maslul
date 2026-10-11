@@ -343,9 +343,10 @@ internal object English : Strings() {
     override val noRidesAroundHint = "Rides show up here while you're on a bus or train, or at a stop one is due at."
     override val nothingMatchesRides = "Nothing matches. Clear the filter to see every ride around you."
     override val onBoardFooter = "Live buses closest to you come first. After you pick one, the trip is planned from its next stop: " +
-        "stay on, or where to get off and change."
+        "stay on, or where to get off and change. Rides going the other way from you come last."
     override fun liveFromYou(distance: String) = "Live · $distance from you"
     override fun dueAt(stop: String) = "Due at $stop"
+    override val otherWay = "Going the other way"
     override val timetableWord = "Timetable"
 
     // ---- Shuttles ------------------------------------------------------------------------
@@ -397,6 +398,7 @@ internal object English : Strings() {
     override val noLinesNearbyHint = "Allow location access to see lines around you."
     override val lineDetailsUnavailable = "Line details unavailable"
     override fun thenTime(time: String) = "then $time"
+    override val showDepartures = "Show departures"
     override fun nVariants(n: Int) = "$n variants"
     override val errSearchStations = "Couldn't search stations. Check your connection."
     override val noStationsFound = "No stations found"

@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.maslul.app.data.BoardCandidate
 import com.maslul.app.data.GeoPoint
+import com.maslul.app.data.OnBoard
 import com.maslul.app.data.Place
 import com.maslul.app.data.PlaceKind
 import com.maslul.app.data.TransitMode
@@ -77,6 +78,9 @@ class OnBoardModel(nav: AppNav, private val onPicked: (Place) -> Unit) : ScreenM
     var mode by mutableStateOf<TransitMode?>(null)
     /** The candidate whose timetable is being looked up after a tap. */
     var picking by mutableStateOf<String?>(null)
+    /** Which way you're moving (degrees from north), once it's known: rides going the other way go last. */
+    var heading by mutableStateOf<Float?>(null)
+        private set
     private var here: GeoPoint? = null
     /** Trips of live vehicles not on the timetable around you, by [BoardCandidate.key]; null when it has none. */
     private val resolved = HashMap<String, String?>()
@@ -95,6 +99,7 @@ class OnBoardModel(nav: AppNav, private val onPicked: (Place) -> Unit) : ScreenM
                 return@launch
             }
             here = p
+            location.heading()?.let { heading = it }
             runCatching { repo.boardCandidates(p) }
                 .onSuccess { candidates = tidy(it); resolveLoose() }
                 .onFailure { if (candidates.isEmpty()) error = S.errOnBoardNetwork }
@@ -126,6 +131,14 @@ class OnBoardModel(nav: AppNav, private val onPicked: (Place) -> Unit) : ScreenM
         }
     }
 
+    /** Follows your position while the list is open, to learn which way you're going. */
+    suspend fun follow() {
+        location.updates(2000).collect { p ->
+            here = p
+            location.heading()?.let { heading = it }
+        }
+    }
+
     /** Vehicles move along with you: keep the list current. */
     suspend fun loop() {
         while (true) {
@@ -139,7 +152,7 @@ class OnBoardModel(nav: AppNav, private val onPicked: (Place) -> Unit) : ScreenM
     val shown: List<BoardCandidate>
         get() {
             val q = query.trim()
-            return candidates
+            return OnBoard.rank(candidates, Instant.now(), heading)
                 .filter { mode == null || it.mode == mode }
                 .filter { q.isEmpty() || it.lineLabel.contains(q, ignoreCase = true) || it.headsign.contains(q, ignoreCase = true) }
         }
@@ -173,6 +186,7 @@ fun OnBoardScreen(model: OnBoardModel) {
     val x = LocalExtra.current
     val now = rememberNow(15_000)
     LaunchedEffect(Unit) { model.loop() }
+    LaunchedEffect(Unit) { model.follow() }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 2.dp) {
             Column(Modifier.statusBarsPadding().padding(bottom = 10.dp)) {
@@ -220,7 +234,9 @@ fun OnBoardScreen(model: OnBoardModel) {
                     Text(S.nothingMatchesRides, style = MaterialTheme.typography.bodyMedium,
                         color = x.subtle, modifier = Modifier.padding(20.dp))
                 }
-                items(shown, key = { it.key }) { c -> CandidateRow(c, now, model.picking == c.key) { model.pick(c) } }
+                items(shown, key = { it.key }) { c ->
+                    CandidateRow(c, now, model.picking == c.key, OnBoard.against(c, model.heading)) { model.pick(c) }
+                }
                 item {
                     Text(
                         S.onBoardFooter,
@@ -234,7 +250,7 @@ fun OnBoardScreen(model: OnBoardModel) {
 }
 
 @Composable
-private fun CandidateRow(c: BoardCandidate, now: Instant, busy: Boolean, onClick: () -> Unit) {
+private fun CandidateRow(c: BoardCandidate, now: Instant, busy: Boolean, otherWay: Boolean, onClick: () -> Unit) {
     val x = LocalExtra.current
     Surface(onClick = onClick, color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -251,13 +267,21 @@ private fun CandidateRow(c: BoardCandidate, now: Instant, busy: Boolean, onClick
                         Spacer(Modifier.width(4.dp))
                         Text(S.liveFromYou(Fmt.distance(c.distanceM)), style = MaterialTheme.typography.bodySmall, color = freshnessColor(f))
                     }
+                    // Where it calls and then: both directions stop here, so this tells them apart.
+                    if (c.stopName != null && c.nextStopName != null) {
+                        Text(Fmt.fromTo(c.stopName, c.nextStopName), style = MaterialTheme.typography.bodySmall, color = x.subtle,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 } else {
                     Text(
-                        listOfNotNull(c.stopName?.let { S.dueAt(it) }, c.stopTime?.let(Fmt::time)).joinToString(" · ")
-                            .ifEmpty { S.timetableWord } + " · " + S.noLiveData,
-                        style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        listOfNotNull(
+                            c.stopName?.let { s -> c.nextStopName?.let { S.dueAt(Fmt.fromTo(s, it)) } ?: S.dueAt(s) },
+                            c.stopTime?.let(Fmt::time),
+                        ).joinToString(" · ").ifEmpty { S.timetableWord } + " · " + S.noLiveData,
+                        style = MaterialTheme.typography.bodySmall, color = x.subtle, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     )
                 }
+                if (otherWay) Text(S.otherWay, style = MaterialTheme.typography.bodySmall, color = x.late, modifier = Modifier.testTag("other_way"))
             }
             if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         }

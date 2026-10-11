@@ -169,6 +169,8 @@ data class Departure(
     val scheduled: Instant,
     val stop: StopCall,
     val agencyId: String? = null,
+    /** The trip's next stop after [stop], when it was asked for. */
+    val next: StopCall? = null,
 )
 
 /** One gtfs route (a direction/alternative of a line) from Stride. */

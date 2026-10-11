@@ -366,9 +366,10 @@ internal object Russian : Strings() {
     override val noRidesAroundHint = "Здесь появляются рейсы, когда вы в автобусе или поезде, или на остановке, к которой он подъезжает."
     override val nothingMatchesRides = "Ничего не подходит. Сбросьте фильтр, чтобы увидеть весь транспорт рядом."
     override val onBoardFooter = "Сначала — ближайшие к вам автобусы онлайн. Когда выберете, маршрут строится от следующей остановки: " +
-        "ехать дальше или где выйти и пересесть."
+        "ехать дальше или где выйти и пересесть. Рейсы в обратную сторону — в конце списка."
     override fun liveFromYou(distance: String) = "Онлайн · $distance от вас"
     override fun dueAt(stop: String) = "Прибывает на $stop"
+    override val otherWay = "В обратную сторону"
     override val timetableWord = "Расписание"
 
     // ---- Shuttles ------------------------------------------------------------------------
@@ -420,6 +421,7 @@ internal object Russian : Strings() {
     override val noLinesNearbyHint = "Разрешите доступ к геолокации, чтобы видеть линии вокруг."
     override val lineDetailsUnavailable = "Информация о линии недоступна"
     override fun thenTime(time: String) = "затем $time"
+    override val showDepartures = "Показать отправления"
     override fun nVariants(n: Int) = "$n ${ruPlural(n.toLong(), "вариант", "варианта", "вариантов")}"
     override val errSearchStations = "Не удалось найти станции. Проверьте подключение к интернету."
     override val noStationsFound = "Станции не найдены"

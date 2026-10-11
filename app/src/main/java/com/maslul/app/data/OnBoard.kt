@@ -20,6 +20,10 @@ data class BoardCandidate(
     /** That stop and when it's due there, for rides known from the timetable. */
     val stopName: String? = null,
     val stopTime: Instant? = null,
+    /** Which way it's going near you (degrees from north): its live vehicle's heading, or from that stop to the next. */
+    val bearing: Float? = null,
+    /** The stop it calls at after [stopName], which tells its direction apart at a stop both ways share. */
+    val nextStopName: String? = null,
 ) {
     val live get() = vehicle != null
     val key get() = tripId ?: "${lineRef}|${vehicle?.journeyRef}|${vehicle?.originDeparture?.epochSecond}"
@@ -82,6 +86,7 @@ object OnBoard {
                 tripId = d.tripId, lineRef = lineRef, lineLabel = d.lineLabel, mode = d.mode, headsign = placeName(d.headsign),
                 agencyName = d.agency, agencyId = d.agencyId, routeColor = d.routeColor, vehicle = v,
                 distanceM = vd ?: stopDistance, stopName = d.stop.name, stopTime = d.scheduled,
+                bearing = v?.bearing ?: d.next?.let { GeoMath.bearing(d.stop.point, it.point) }, nextStopName = d.next?.name,
             )
             val score = score(c, now)
             val prev = out[d.tripId]
@@ -93,13 +98,29 @@ object OnBoard {
     /** [name], unless it's a code rather than a place (trains are signed with their number: "785"). */
     fun placeName(name: String) = name.takeIf { n -> n.any(Char::isLetter) }.orEmpty()
 
-    /** Lower is likelier: live vehicles by distance first, then timetable rides by distance and time. */
-    fun score(c: BoardCandidate, now: Instant): Double =
-        if (c.live) c.distanceM
-        else 100_000.0 + c.distanceM + M_PER_MIN * Math.abs((c.stopTime ?: now).epochSecond - now.epochSecond) / 60.0
+    /** Farther off than this from the way you're moving, a ride is going the other way. */
+    private const val AGAINST_DEG = 110f
 
-    fun rank(list: List<BoardCandidate>, now: Instant): List<BoardCandidate> =
-        list.distinctBy { it.key }.sortedBy { score(it, now) }
+    /**
+     * Whether [c] goes the other way from where you're [heading] (degrees from north, null when
+     * not known): both directions of a line stop at the same station, often minutes apart.
+     */
+    fun against(c: BoardCandidate, heading: Float?): Boolean {
+        val b = c.bearing ?: return false
+        return heading != null && Math.abs(GeoMath.angleDiff(heading, b)) > AGAINST_DEG
+    }
+
+    /**
+     * Lower is likelier: live vehicles by distance first, then timetable rides by distance and
+     * time; rides going the other way from your [heading] after all of them.
+     */
+    fun score(c: BoardCandidate, now: Instant, heading: Float? = null): Double =
+        (if (against(c, heading)) 1_000_000.0 else 0.0) +
+            if (c.live) c.distanceM
+            else 100_000.0 + c.distanceM + M_PER_MIN * Math.abs((c.stopTime ?: now).epochSecond - now.epochSecond) / 60.0
+
+    fun rank(list: List<BoardCandidate>, now: Instant, heading: Float? = null): List<BoardCandidate> =
+        list.distinctBy { it.key }.sortedBy { score(it, now, heading) }
 
     /** Time to step off and get to another ride at the same stop. */
     const val CHANGE_SEC = 120L

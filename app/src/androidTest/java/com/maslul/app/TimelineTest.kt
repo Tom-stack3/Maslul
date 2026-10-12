@@ -44,7 +44,7 @@ class TimelineTest {
                         Text("Ride 12 stops · 1 h 10 min", Modifier.testTag("after"))
                     }
                     TimelineRow(rail, null, Node.STOP, Color.Red) {
-                        Text("Haifa Center", Modifier.testTag("next"))
+                        Text("Next stop", Modifier.testTag("next"))
                     }
                 }
             }

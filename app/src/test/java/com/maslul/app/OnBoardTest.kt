@@ -158,8 +158,8 @@ class OnBoardTest {
         val south = "20261005_10:00_il-Israel-MOT_11_051026"
         val north = "20261005_10:00_il-Israel-MOT_12_051026"
         val deps = listOf(
-            200.0 to tram(south, "Bat Yam", at(-1), -1.0),
-            200.0 to tram(north, "Petah Tikva", at(-3), 1.0),
+            200.0 to tram(south, "South end", at(-1), -1.0),
+            200.0 to tram(north, "North end", at(-3), 1.0),
         )
         val found = OnBoard.fromDepartures(p(0.0), deps, emptyMap(), now)
         assertEquals(0f, found.first { it.tripId == north }.bearing!!, 1f)

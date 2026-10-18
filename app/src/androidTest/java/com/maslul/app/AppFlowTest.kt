@@ -33,6 +33,12 @@ import org.junit.runner.RunWith
 /** End-to-end flows on a device, against the live services. */
 @RunWith(AndroidJUnit4::class)
 class AppFlowTest {
+    private companion object {
+        val DIZENGOFF = arrayOf("Dizengoff", "דיזנגוף")
+        val HAIFA_CENTER = arrayOf("HaShemona", "Hashmona", "השמונה")
+        val AZRIELI = arrayOf("Azrieli", "עזריאלי")
+    }
+
     @get:Rule(order = 0)
     val permissions: GrantPermissionRule = GrantPermissionRule.grant(
         android.Manifest.permission.ACCESS_FINE_LOCATION,
@@ -54,10 +60,7 @@ class AppFlowTest {
 
     @Test
     fun planTripToAPlace() {
-        rule.onNodeWithText("Where to?").performClick()
-        rule.onNodeWithTag("field_to").performTextInput("dizengoff center")
-        rule.waitUntil(20_000) { rule.onAllNodes(hasText("Dizengoff Center")).fetchSemanticsNodes().isNotEmpty() }
-        rule.onAllNodes(hasText("Dizengoff Center"))[0].performClick()
+        planTo("dizengoff center", *DIZENGOFF)
         rule.waitUntil(40_000) { rule.onAllNodes(hasTestTag("routes_list")).fetchSemanticsNodes().isNotEmpty() }
         // A route card: "06:10 – 06:42".
         val span = Regex("""(\d\d):(\d\d) – \d\d:\d\d""")
@@ -80,7 +83,7 @@ class AppFlowTest {
 
     @Test
     fun aRoutesDetailsScrollToTheDestination() {
-        planTo("haifa center", "Haifa Center HaShemona")
+        planTo("haifa center", *HAIFA_CENTER)
         rule.waitUntil(60_000) { rule.onAllNodes(hasText(" – ", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         rule.onAllNodes(hasText(" – ", substring = true))[0].performClick()
         rule.waitUntil(20_000) { rule.onAllNodes(hasTestTag("route_detail")).fetchSemanticsNodes().isNotEmpty() }
@@ -135,10 +138,7 @@ class AppFlowTest {
 
     @Test
     fun closingOptionsUntouchedKeepsTheRoutes() {
-        rule.onNodeWithText("Where to?").performClick()
-        rule.onNodeWithTag("field_to").performTextInput("dizengoff center")
-        rule.waitUntil(20_000) { rule.onAllNodes(hasText("Dizengoff Center")).fetchSemanticsNodes().isNotEmpty() }
-        rule.onAllNodes(hasText("Dizengoff Center"))[0].performClick()
+        planTo("dizengoff center", *DIZENGOFF)
         rule.waitUntil(60_000) { rule.onAllNodes(hasText("min walk", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Options").performClick()
         rule.waitUntil(5_000) { rule.onAllNodes(hasText("Show routes")).fetchSemanticsNodes().isNotEmpty() }
@@ -161,11 +161,24 @@ class AppFlowTest {
     private fun advanced(rides: Boolean, onBoard: Boolean) =
         MaslulApp.instance.store.updateSettings { it.copy(rides = rides, onBoard = onBoard) }
 
-    private fun planTo(query: String, pick: String) {
-        rule.onNodeWithText("Where to?").performClick()
+    /**
+     * A result row naming the place in any of [names], not the search field. The geocoders rename
+     * places now and then ("Dizengoff Center" became "Dizengoff Central") and may answer in
+     * Hebrew, so a row is matched by a distinctive part of its name, in either language.
+     */
+    private fun suggestion(vararg names: String) =
+        names.map { hasText(it, substring = true, ignoreCase = true) }.reduce { a, b -> a or b } and !hasSetTextAction()
+
+    /** Types [query] in the "to" field and picks the first suggestion naming the place. */
+    private fun search(query: String, vararg names: String) {
         rule.onNodeWithTag("field_to").performTextInput(query)
-        rule.waitUntil(20_000) { rule.onAllNodes(hasText(pick)).fetchSemanticsNodes().isNotEmpty() }
-        rule.onAllNodes(hasText(pick))[0].performClick()
+        rule.waitUntil(20_000) { rule.onAllNodes(suggestion(*names)).fetchSemanticsNodes().isNotEmpty() }
+        rule.onAllNodes(suggestion(*names))[0].performClick()
+    }
+
+    private fun planTo(query: String, vararg names: String) {
+        rule.onNodeWithText("Where to?").performClick()
+        search(query, *names)
     }
 
     @Test
@@ -173,7 +186,7 @@ class AppFlowTest {
         advanced(rides = false, onBoard = false)
         rule.waitForIdle()
         assertTrue(rule.onAllNodes(hasTestTag("on_board")).fetchSemanticsNodes().isEmpty())
-        planTo("dizengoff center", "Dizengoff Center")
+        planTo("dizengoff center", *DIZENGOFF)
         rule.waitUntil(40_000) { rule.onAllNodes(hasTestTag("routes_list")).fetchSemanticsNodes().isNotEmpty() }
         assertTrue(rule.onAllNodes(hasTestTag("ride_chip")).fetchSemanticsNodes().isEmpty())
         // Each switch brings back only its own tool.
@@ -186,7 +199,7 @@ class AppFlowTest {
     @Test
     fun aRideWithinMinutesSaysWhereToGetOut() {
         advanced(rides = true, onBoard = false)
-        planTo("haifa center", "Haifa Center HaShemona")
+        planTo("haifa center", *HAIFA_CENTER)
         rule.waitUntil(40_000) { rule.onAllNodes(hasTestTag("ride_chip")).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithTag("ride_chip").performClick()
         rule.onNodeWithText("15 min").performClick()
@@ -273,11 +286,9 @@ class AppFlowTest {
         rule.onNodeWithText("New shuttle").assertIsDisplayed()
     }
 
-    private fun pickStop(row: String, query: String, pick: String) {
+    private fun pickStop(row: String, query: String, vararg names: String) {
         rule.onNodeWithText(row).performScrollTo().performClick()
-        rule.onNodeWithTag("field_to").performTextInput(query)
-        rule.waitUntil(20_000) { rule.onAllNodes(hasText(pick) and !hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
-        rule.onAllNodes(hasText(pick) and !hasSetTextAction())[0].performClick()
+        search(query, *names)
         rule.waitUntil(5_000) { rule.onAllNodes(hasText("New shuttle")).fetchSemanticsNodes().isNotEmpty() }
     }
 
@@ -286,8 +297,8 @@ class AppFlowTest {
         val name = "Test ${System.currentTimeMillis() % 10000}"
         openNewShuttle()
         rule.onNodeWithTag("shuttle_name").performTextInput(name)
-        pickStop("From", "dizengoff center", "Dizengoff Center")
-        pickStop("To", "azrieli center", "Azrieli Center")
+        pickStop("From", "dizengoff center", *DIZENGOFF)
+        pickStop("To", "azrieli center", *AZRIELI)
         rule.onNodeWithTag("shuttle_times").performTextInput("8:15 07:30")
         setRide(120f)
         rule.onNodeWithTag("shuttle_ride").assertTextEquals("120 min")

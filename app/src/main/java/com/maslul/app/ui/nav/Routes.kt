@@ -156,7 +156,8 @@ enum class TimeMode { NOW, DEPART, ARRIVE }
 /** Why a search came back empty, for screens that word [RoutesModel.error] their own way. */
 enum class RouteError { LOCATION, NO_ROUTES, NETWORK }
 
-class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
+/** With [nextRides], also looks up the rides after each option's first one: when the next bus comes (see [findNextRides]). */
+class RoutesModel(nav: AppNav, from: Place, to: Place, private val nextRides: Boolean = false) : ScreenModel(nav) {
     var from by mutableStateOf(from)
     var to by mutableStateOf(to)
     var timeMode by mutableStateOf(TimeMode.NOW)
@@ -252,6 +253,23 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             .partition { it.shuttleId != null }
         // The user's shuttles: their own timetable says what comes next.
         own.forEach { l -> ShuttleSchedule.ridesAfter(store.data.value.shuttles, l)?.let { after[l.rideKey] = it } }
+        coroutineScope {
+            legs.map { l -> async { runCatching { l.rideKey to repo.ridesAfter(l, modes) }.getOrNull() } }
+                .awaitAll().filterNotNull().forEach { (k, v) -> after[k] = v }
+        }
+    }
+
+    /**
+     * The next rides after each top option's first one, into [after]: what comes next if this bus is
+     * missed, which the other lines found for it don't tell when a line runs every half hour.
+     */
+    private suspend fun findNextRides() {
+        if (!nextRides) return
+        val modes = store.data.value.settings.modes
+        val legs = itineraries.take(6).mapNotNull { it.firstTransit }
+            .filter { it.shuttleId == null && (it.tripId == null || it.tripId != onBoardTripId) }
+            .distinctBy { it.rideKey }
+            .filter { it.rideKey !in after }
         coroutineScope {
             legs.map { l -> async { runCatching { l.rideKey to repo.ridesAfter(l, modes) }.getOrNull() } }
                 .awaitAll().filterNotNull().forEach { (k, v) -> after[k] = v }
@@ -381,6 +399,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             findAlternatives()
             refreshLive()
             findRidesAfter()
+            findNextRides()
         }
     }
 
@@ -472,6 +491,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             findAlternatives()
             refreshLive()
             findRidesAfter()
+            findNextRides()
         }
     }
 

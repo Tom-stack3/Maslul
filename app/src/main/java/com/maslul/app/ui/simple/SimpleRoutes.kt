@@ -44,12 +44,14 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.maslul.app.data.Combine
 import com.maslul.app.data.IsraelZone
 import com.maslul.app.data.Itinerary
 import com.maslul.app.data.Leg
+import com.maslul.app.data.LiveCall
 import com.maslul.app.data.LiveStatus
 import com.maslul.app.data.Place
 import com.maslul.app.data.TransitMode
@@ -71,9 +73,35 @@ import java.time.Instant
 /** Longest walk offered as a way there on its own. */
 private const val WALK_OPTION_SEC = 20 * 60L
 
+/** Buses listed on an option: the one to take and the next couple. */
+private const val NEXT_BUSES = 3
+
+/**
+ * The first few buses of [itin]'s first ride that can still be caught, soonest first: its other
+ * options and the rides [after] it, each with its live state and whether it takes hurrying.
+ */
+fun nextBuses(itin: Itinerary, now: Instant, liveOf: (Leg) -> LiveCall?, after: (Leg) -> List<Leg>): List<NextBus> {
+    val i = itin.legs.indexOfFirst { it.mode.isTransit }.takeIf { it >= 0 } ?: return emptyList()
+    val first = itin.legs[i]
+    val reach = Combine.reachBy(itin, i, now, liveOf = liveOf)
+    val later = after(first).filter { Combine.sameRide(it, first) && Combine.catchable(it, liveOf(it), reach) }
+    // The planned bus stays listed when nothing else is known, even if it looks gone: the card is about it.
+    return (Combine.catchableOptions(itin, i, now, hurry = true, liveOf = liveOf) + later).ifEmpty { listOf(first) }
+        .distinctBy { it.rideKey }
+        .sortedBy { Combine.boards(it, liveOf(it)) }
+        .take(NEXT_BUSES)
+        .map { NextBus(it, liveOf(it), Combine.onlyByHurrying(itin, i, it, now, liveOf(it), liveOf)) }
+}
+
+/** One bus an option could take, as listed on its card. */
+data class NextBus(val leg: Leg, val live: LiveCall?, val hurry: Boolean) {
+    val time: Instant get() = Combine.boards(leg, live)
+    val isLive: Boolean get() = live?.status == LiveStatus.LIVE
+}
+
 /** Ways from here to [to], planned by the full app's [RoutesModel] and shown plainly. */
 class SimpleRoutesModel(nav: AppNav, val to: Place, val title: String) : ScreenModel(nav) {
-    val planner = RoutesModel(nav, CurrentLocation, to)
+    val planner = RoutesModel(nav, CurrentLocation, to, nextRides = true)
     var showAll by mutableStateOf(false)
 
     /** [itin] at the times its buses are expected, when they're tracked live. */
@@ -86,6 +114,13 @@ class SimpleRoutesModel(nav: AppNav, val to: Place, val title: String) : ScreenM
     fun options(now: Instant): List<Itinerary> = planner.itineraries
         .filter { itin -> itin.legs.none { it.mode == TransitMode.CAR } }
         .filter { !expected(it).start.isBefore(now.minusSeconds(60)) }
+
+    /**
+     * The first few buses of [itin]'s first ride that can still be caught, soonest first: other lines
+     * between the same stops and the ones after, each with its live state and whether it takes hurrying.
+     */
+    fun nextBuses(itin: Itinerary, now: Instant): List<NextBus> =
+        nextBuses(itin, now, { planner.rideLive[it.rideKey] }) { planner.after[it.rideKey].orEmpty() }
 
     /** Walking there, when it's short enough to suggest (or nothing else was found). */
     fun walk(hasOptions: Boolean): Itinerary? = planner.walkOnly?.takeIf { !hasOptions || it.durationSec <= WALK_OPTION_SEC }
@@ -161,7 +196,7 @@ fun SimpleRoutesScreen(model: SimpleRoutesModel) = SimpleFrame {
                         item { WalkCard(walk) { model.open(walk) } }
                     }
                     itemsIndexed(shown, key = { _, it -> it.id }) { i, itin ->
-                        OptionCard(model.expected(itin), best = i == 0, live = model.isLive(itin), now = now) { model.open(itin) }
+                        OptionCard(model.expected(itin), model.nextBuses(itin, now), best = i == 0, live = model.isLive(itin), now = now) { model.open(itin) }
                     }
                     if (walk != null && options.isNotEmpty() && walk.end > model.expected(options.first()).end) {
                         item { WalkCard(walk) { model.open(walk) } }
@@ -218,7 +253,7 @@ private fun timeText(s: SimpleStrings, t: Instant, now: Instant = Instant.now())
 }
 
 @Composable
-private fun OptionCard(itin: Itinerary, best: Boolean, live: Boolean, now: Instant, onClick: () -> Unit) {
+private fun OptionCard(itin: Itinerary, buses: List<NextBus>, best: Boolean, live: Boolean, now: Instant, onClick: () -> Unit) {
     val s = LocalSimpleStrings.current
     Surface(
         onClick = onClick,
@@ -246,10 +281,58 @@ private fun OptionCard(itin: Itinerary, best: Boolean, live: Boolean, now: Insta
             }
             Spacer(Modifier.height(12.dp))
             Rides(itin.transitLegs)
+            if (buses.isNotEmpty()) {
+                Spacer(Modifier.height(14.dp))
+                NextBuses(itin.firstTransit?.from?.name.orEmpty(), buses, now)
+            }
             Spacer(Modifier.height(12.dp))
             Text(s.arriveAt(timeText(s, itin.end, now)), fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
             Text(s.changes(itin.transitLegs.size - 1), fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+}
+
+/**
+ * When the buses come to the first stop: "[18] in 4 min · [18] in 19 min", big, live ones marked,
+ * so you can tell whether you'll make the first one and how long the next one takes.
+ */
+@Composable
+private fun NextBuses(stop: String, buses: List<NextBus>, now: Instant) {
+    val s = LocalSimpleStrings.current
+    val x = LocalExtra.current
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 16.dp, vertical = 12.dp).testTag("next_buses"),
+    ) {
+        Text(s.nextAt(stop), fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2,
+            overflow = TextOverflow.Ellipsis)
+        buses.forEach { b ->
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LineBadge(simpleLine(b.leg).ifEmpty { s.mode(b.leg.mode) }, b.leg.mode, color = lineColor(b.leg), large = true)
+                Spacer(Modifier.width(12.dp))
+                Text(comesText(s, b.time, now), fontSize = 24.sp, fontWeight = FontWeight.Bold,
+                    color = if (b.isLive) x.live else MaterialTheme.colorScheme.onSurface)
+                if (b.isLive) {
+                    Spacer(Modifier.width(8.dp))
+                    LiveDot(size = 10.dp)
+                }
+                if (b.hurry) {
+                    Spacer(Modifier.width(10.dp))
+                    Text(s.hurry, fontSize = 19.sp, fontWeight = FontWeight.Bold, color = x.late)
+                }
+            }
+        }
+    }
+}
+
+/** "now", "in 4 min", or the clock time when it's an hour off or more. */
+private fun comesText(s: SimpleStrings, t: Instant, now: Instant): String {
+    val sec = t.epochSecond - now.epochSecond
+    return when {
+        sec < 45 -> s.comesNow
+        sec < 60 * 60 -> s.comesIn((sec + 30) / 60)
+        else -> s.comesAt(timeText(s, t, now))
     }
 }
 

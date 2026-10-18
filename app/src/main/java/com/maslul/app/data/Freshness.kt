@@ -35,8 +35,8 @@ enum class Freshness {
     }
 }
 
-/** When the matched vehicle last reported, if this call is tracked live. */
-val LiveCall.recordedAt: Instant? get() = vehicle?.takeIf { status == LiveStatus.LIVE }?.recordedAt
+/** When the matched vehicle last reported (or the Ministry last updated its prediction), if this call is tracked live. */
+val LiveCall.recordedAt: Instant? get() = if (status != LiveStatus.LIVE) null else listOfNotNull(vehicle?.recordedAt, predictedAt).maxOrNull()
 
 fun LiveCall?.freshness(now: Instant): Freshness = Freshness.of(this?.recordedAt, now)
 

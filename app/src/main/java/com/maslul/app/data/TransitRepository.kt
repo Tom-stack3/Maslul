@@ -49,6 +49,8 @@ class TransitRepository(
     private val stride: StrideApi = StrideApi(),
     private val nominatim: NominatimApi = NominatimApi(),
     val live: LiveRepository = LiveRepository(),
+    /** The Ministry's predicted arrivals; null leaves the estimates from vehicle positions alone. */
+    private val predictions: StopPredictions? = StopPredictions(),
 ) {
     private val tripCache = object : LinkedHashMap<String, Leg>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Leg>?) = size > 80
@@ -451,7 +453,16 @@ class TransitRepository(
         val vehicles = leg.lineRef?.let { live.vehiclesForLine(it) }.orEmpty()
         val v = vehicles.forTrip(parsed.tripNumber, parsed.originDeparture)
         val origin = calls.first().scheduledTime ?: parsed.originDeparture
-        return LiveCalls.compute(timeline, origin, board, alight, v, now)
+        val call = LiveCalls.compute(timeline, origin, board, alight, v, now)
+        // The Ministry predicts buses on their way; a ride later than that has no prediction to look up.
+        return if (call.best.isAfter(now.plusSeconds(PREDICTION_AHEAD_SEC))) call else withPrediction(call, leg.from, tripId, now)
+    }
+
+    /** [call] (trip [tripId] at [stop]) with the Ministry's predicted arrival there, when it has one. */
+    private suspend fun withPrediction(call: LiveCall, stop: StopCall, tripId: String, now: Instant): LiveCall {
+        val code = stop.code ?: return call
+        val gtfs = TripIds.parse(tripId)?.gtfsTripId ?: return call
+        return LiveCalls.withPrediction(call, predictions?.at(code)?.get(gtfs), now)
     }
 
     /**
@@ -530,7 +541,9 @@ class TransitRepository(
                     } else {
                         null
                     }
-                    BoardEntry(d, liveCall)
+                    val predicted = liveCall?.takeIf { d.scheduled.isBefore(now.plusSeconds(PREDICTION_AHEAD_SEC)) || it.status == LiveStatus.LIVE }
+                        ?.let { runCatching { withPrediction(it, d.stop, d.tripId, now) }.getOrNull() }
+                    BoardEntry(d, predicted ?: liveCall)
                 }
             }.awaitAll().let { arrangeBoard(it, now) }
         }
@@ -721,6 +734,9 @@ class TransitRepository(
         /** Requests at once when trying several starting points (see [onward]). */
         private const val FAN_OUT = 2
         private const val ONWARD_TIMEOUT_MS = 15_000L
+
+        /** Rides due within this long are looked up in the Ministry's predictions (see [StopPredictions]). */
+        const val PREDICTION_AHEAD_SEC = 45 * 60L
 
         /** How far back to look for late trips whose scheduled time at a stop already passed. */
         const val LATE_WINDOW_SEC = 90 * 60L

@@ -100,8 +100,9 @@ class EtaTest {
         val v = vehicle(1.5, t)
         val live = LiveCalls.compute(timeline, origin, 3, 4, v, t)
         assertEquals(LiveStatus.LIVE, live.status)
-        near(origin.plusSeconds(420), live.expected)
-        near(origin.plusSeconds(540), live.alightExpected)
+        // Our estimates run early for a bus this close: a minute is added (see [LiveCalls.estimateCorrected]).
+        near(origin.plusSeconds(420 + LiveCalls.ESTIMATE_EARLY_SEC), live.expected)
+        near(origin.plusSeconds(540 + LiveCalls.ESTIMATE_EARLY_SEC), live.alightExpected)
         assertEquals(2, live.stopsAway)
 
         assertEquals(LiveStatus.PASSED, LiveCalls.compute(timeline, origin, 1, 4, v, t).status)
@@ -139,8 +140,8 @@ class EtaTest {
         assertEquals(LiveStatus.LIVE, liveA.status)
         assertEquals(a, liveA.vehicle)
         assertEquals(b, liveB.vehicle)
-        // A is ~1.5 km from the stop: arriving within a couple of minutes, not at B's 18:16.
-        assertTrue(liveA.best.isBefore(now.plusSeconds(4 * 60)))
+        // A is ~1.5 km from the stop: arriving within a few minutes, not at B's 18:16.
+        assertTrue(liveA.best.isBefore(now.plusSeconds(5 * 60)))
         assertTrue(liveA.best.isBefore(liveB.best))
 
         val board = TransitRepository.arrangeBoard(listOf(BoardEntry(depB, liveB), BoardEntry(depA, liveA)), now)

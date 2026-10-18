@@ -1,6 +1,10 @@
 package com.maslul.app.data
 
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.Serializable
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -71,7 +75,7 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
                 req.language?.let { addQueryParameter("language", it) }
             }
             .build()
-        val dto = Http.getJson<PlanDto>(url)
+        val dto = planGate.withPermit { getPlan(url) }
         return PlanResult(
             itineraries = dto.itineraries.map { it.toDomain() }
                 // A lift is one drive: a car again after walking would need the car to be waiting there.
@@ -161,7 +165,28 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
         return Http.getJson<StopTimesDto>(url).stopTimes.mapNotNull { it.toDomain() }
     }
 
+    /** A plan request, tried again when Transitous turns it away for too many at once. */
+    private suspend fun getPlan(url: HttpUrl): PlanDto {
+        repeat(PLAN_RETRIES) { attempt ->
+            try {
+                return Http.getJson<PlanDto>(url)
+            } catch (e: HttpException) {
+                if (e.code != 429) throw e
+                delay(RETRY_DELAY_MS * (attempt + 1))
+            }
+        }
+        return Http.getJson<PlanDto>(url)
+    }
+
     companion object {
+        /**
+         * Transitous answers at most three plan requests from one address at a time and turns the
+         * rest away (HTTP 429), so a search's own lookups (other lines, a longer walk) would fail.
+         */
+        private val planGate = Semaphore(3)
+        private const val PLAN_RETRIES = 3
+        private const val RETRY_DELAY_MS = 700L
+
         // Israel's GTFS has no platform_code; the platform and floor sit in stop_desc instead:
         // "רחוב: יהושע חנקין עיר: באר שבע רציף: 13  קומה: " (empty when the stop has none).
         private val PLATFORM = Regex("""רציף:\s*([^\s:]+)(?=\s|$)""")

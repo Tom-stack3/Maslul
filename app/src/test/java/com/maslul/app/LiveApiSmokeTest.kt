@@ -11,6 +11,9 @@ import com.maslul.app.data.TransitMode
 import com.maslul.app.data.TransitRepository
 import com.maslul.app.data.TransitousApi
 import com.maslul.app.data.TripIds
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertFalse
 import org.junit.Assume
@@ -70,6 +73,17 @@ class LiveApiSmokeTest {
             val lines = i.transitLegs.joinToString(">") { it.lineLabel }
             println("${i.start}–${i.end} t${i.transfers} $lines risk=${Ranking.riskiest(i)?.slackSec}")
         }
+    }
+
+    @Test
+    fun manyPlansAtOnceAllGetAnswers() = runBlocking {
+        // More than Transitous takes from one address at a time, as a search's lookups of other lines are.
+        val to = GeoPoint(32.0745, 34.7920)
+        val results = coroutineScope {
+            (0 until 7).map { i -> async { runCatching { repo.plan(TransitousApi.PlanRequest(GeoPoint(32.08 + i * 0.003, 34.775), to)) } } }.awaitAll()
+        }
+        results.forEach { r -> r.exceptionOrNull()?.let { throw it } }
+        assertTrue(results.all { it.getOrThrow().itineraries.isNotEmpty() })
     }
 
     @Test

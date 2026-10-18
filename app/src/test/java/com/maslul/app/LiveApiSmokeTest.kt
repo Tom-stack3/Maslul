@@ -75,6 +75,22 @@ class LiveApiSmokeTest {
         }
     }
 
+    /** 08:00 on the next weekday, when buses run everywhere. */
+    private fun weekdayMorning(): Instant {
+        var day = LocalDate.now(IsraelZone).plusDays(1)
+        while (day.dayOfWeek == java.time.DayOfWeek.FRIDAY || day.dayOfWeek == java.time.DayOfWeek.SATURDAY) day = day.plusDays(1)
+        return day.atTime(8, 0).atZone(IsraelZone).toInstant()
+    }
+
+    @Test
+    fun shortTripOffersRidesBesideTheWalk() = runBlocking {
+        // Tel Aviv central station to a street 500 m north: a 14-minute walk, and a bus that's hardly faster.
+        val r = repo.plan(TransitousApi.PlanRequest(GeoPoint(32.0560, 34.7795), GeoPoint(32.0605, 34.7795), time = weekdayMorning()))
+        println("short: walk ${r.walkOnly?.durationSec?.div(60)} min, rides ${r.itineraries.map { it.transitLegs.joinToString(">") { l -> l.lineLabel } }}")
+        assertTrue(r.walkOnly != null)
+        assertTrue("expected rides too", r.itineraries.isNotEmpty())
+    }
+
     @Test
     fun manyPlansAtOnceAllGetAnswers() = runBlocking {
         // More than Transitous takes from one address at a time, as a search's lookups of other lines are.

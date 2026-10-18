@@ -69,6 +69,8 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
                 req.preTransitModes?.let { addQueryParameter("preTransitModes", it) }
                 req.directModes?.let { addQueryParameter("directModes", it) }
                 req.maxDirectMinutes?.let { addQueryParameter("maxDirectTime", (it * 60).toString()) }
+                // Otherwise a ride slower than walking there is dropped: a short trip offers the walk alone.
+                addQueryParameter("fastestDirectFactor", FASTEST_DIRECT_FACTOR.toString())
                 if (req.wheelchair) addQueryParameter("pedestrianProfile", "WHEELCHAIR")
                 req.maxTransfers?.let { addQueryParameter("maxTransfers", it.toString()) }
                 req.pageCursor?.let { addQueryParameter("pageCursor", it) }
@@ -186,6 +188,9 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
         private val planGate = Semaphore(3)
         private const val PLAN_RETRIES = 3
         private const val RETRY_DELAY_MS = 700L
+
+        /** Rides up to this many times as long as walking there are still offered. */
+        const val FASTEST_DIRECT_FACTOR = 2.0
 
         // Israel's GTFS has no platform_code; the platform and floor sit in stop_desc instead:
         // "רחוב: יהושע חנקין עיר: באר שבע רציף: 13  קומה: " (empty when the stop has none).

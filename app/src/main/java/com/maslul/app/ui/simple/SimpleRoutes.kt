@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
@@ -186,14 +188,24 @@ fun SimpleRoutesScreen(model: SimpleRoutesModel) = SimpleFrame {
             }
             else -> {
                 val shown = if (model.showAll) options else options.take(3)
+                val walkFirst = walk != null && (options.isEmpty() || walk.end <= model.expected(options.first()).end)
+                // A better way that turns up later goes in above the one showing; the list would stay on
+                // that one, with the best out of sight above. Unless she scrolled herself, show the top.
+                val listState = rememberLazyListState()
+                var scrolled by remember { mutableStateOf(false) }
+                LaunchedEffect(listState) {
+                    listState.interactionSource.interactions.collect { if (it is DragInteraction.Start) scrolled = true }
+                }
+                LaunchedEffect(if (walkFirst) "walk" else shown.firstOrNull()?.id) { if (!scrolled) listState.scrollToItem(0) }
                 LazyColumn(
                     Modifier.fillMaxSize().testTag("simple_routes"),
+                    state = listState,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     // A short walk beats waiting for a bus: offer it first.
-                    if (walk != null && (options.isEmpty() || walk.end <= model.expected(options.first()).end)) {
-                        item { WalkCard(walk) { model.open(walk) } }
+                    if (walkFirst) {
+                        item { WalkCard(walk!!) { model.open(walk) } }
                     }
                     itemsIndexed(shown, key = { _, it -> it.id }) { i, itin ->
                         OptionCard(model.expected(itin), model.nextBuses(itin, now), best = i == 0, live = model.isLive(itin), now = now) { model.open(itin) }

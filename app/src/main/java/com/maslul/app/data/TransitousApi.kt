@@ -85,6 +85,9 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
                 // Otherwise a ride slower than walking there is dropped: a short trip offers the walk alone.
                 addQueryParameter("fastestDirectFactor", FASTEST_DIRECT_FACTOR.toString())
                 req.maxMatchingMeters?.let { addQueryParameter("maxMatchingDistance", it.toString()) }
+                // Changes walk the streets: otherwise 230 m between two stops is timed as one minute, and a
+                // bus stop with no listed link to the train station beside it can't connect to the train.
+                addQueryParameter("useRoutedTransfers", "true")
                 if (req.wheelchair) addQueryParameter("pedestrianProfile", "WHEELCHAIR")
                 req.maxTransfers?.let { addQueryParameter("maxTransfers", it.toString()) }
                 req.pageCursor?.let { addQueryParameter("pageCursor", it) }

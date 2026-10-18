@@ -92,6 +92,13 @@ class LiveApiSmokeTest {
     }
 
     @Test
+    fun plansFromInsideAClosedArea() = runBlocking {
+        // The middle of the Kirya, more than 250 m from a street open to the public.
+        val r = repo.plan(TransitousApi.PlanRequest(GeoPoint(32.0753, 34.7897), GeoPoint(32.0809, 34.7806), time = weekdayMorning()))
+        assertTrue("expected a way out", r.itineraries.isNotEmpty() || r.walkOnly != null)
+    }
+
+    @Test
     fun manyPlansAtOnceAllGetAnswers() = runBlocking {
         // More than Transitous takes from one address at a time, as a search's lookups of other lines are.
         val to = GeoPoint(32.0745, 34.7920)

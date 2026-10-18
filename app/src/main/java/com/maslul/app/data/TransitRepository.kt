@@ -502,7 +502,7 @@ class TransitRepository(
             runCatching { transitous.stopTimes(stopId, now.minusSeconds(LATE_WINDOW_SEC), count = 10, language = language, windowSec = LATE_WINDOW_SEC) }
                 .getOrDefault(emptyList())
         }
-        val deps = perLine(mergeDepartures(upcoming.await(), recent.await(), now), now)
+        val deps = perLine(atStop(mergeDepartures(upcoming.await(), recent.await(), now), stopId), now)
         val snapshot = live.snapshot()
         boardEntries(deps, snapshot, now)
     }
@@ -541,11 +541,16 @@ class TransitRepository(
     /** Lines leaving from the stops nearest to [here], each at its closest stop. */
     suspend fun nearbyLines(here: GeoPoint, stops: List<Place>, now: Instant = Instant.now()): List<NearbyLine> = coroutineScope {
         stops.filter { it.stopId != null }.take(8)
-            .map { st -> async { runCatching { st to transitous.stopTimes(st.stopId!!, count = 25, language = language) }.getOrNull() } }
+            .map { st ->
+                async {
+                    // The next hour: a count alone gives a busy stop's frequent lines and leaves the rest out.
+                    runCatching { st to transitous.stopTimes(st.stopId!!, count = 25, language = language, windowSec = 3600) }.getOrNull()
+                }
+            }
             .awaitAll().filterNotNull()
             .flatMap { (st, deps) ->
                 val d = GeoMath.distance(here, st.point)
-                deps.filter { it.scheduled.isAfter(now.minusSeconds(60)) }.map { Triple(st, d, it) }
+                atStop(deps, st.stopId!!).filter { it.scheduled.isAfter(now.minusSeconds(60)) }.map { Triple(st, d, it) }
             }
             .groupBy { (_, _, dep) -> "${dep.routeId ?: dep.lineLabel}|${dep.headsign}" }
             .values.map { g ->
@@ -727,6 +732,19 @@ class TransitRepository(
                 .filter { it.scheduled.isAfter(now.minusSeconds(LATE_WINDOW_SEC)) }
                 .filter { seen.add(it.tripId + "|" + it.scheduled.epochSecond) }
                 .sortedBy { it.scheduled }
+        }
+
+        /**
+         * The departures that leave from [stopId] itself. Transitous adds those of same-named stops
+         * nearby, such as the one across the street, whose buses go the other way; bays of one
+         * station share its stop code and stay. Unchanged when none leave from the stop (a station's
+         * own id, whose bays have ids of their own).
+         */
+        fun atStop(deps: List<Departure>, stopId: String): List<Departure> {
+            val own = deps.filter { it.stop.stopId == stopId }
+            if (own.isEmpty()) return deps
+            val code = own.firstNotNullOfOrNull { it.stop.code }
+            return deps.filter { it.stop.stopId == stopId || (code != null && it.stop.code == code) }
         }
 
         /** Rides of each line and direction a board shows: any whose time here has passed (maybe late), and the next [next]. */

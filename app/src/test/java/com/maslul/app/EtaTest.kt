@@ -203,4 +203,16 @@ class EtaTest {
         assertEquals(setOf("t1--5", "t1-5", "t1-10", "t1-15", "t2-4", "t2-50"), kept.map { it.tripId }.toSet())
         assertEquals(6, kept.size)
     }
+
+    @Test
+    fun boardShowsOnlyTheStopsOwnDepartures() {
+        val now = origin
+        fun dep(trip: String, stopId: String, code: String?) =
+            departure(trip, now.plusSeconds(300)).copy(stop = StopCall(stopId, "Center", code, 0.0, 0.0, null, now.plusSeconds(300)))
+        // This stop, the same-named one across the street, and another bay of this station.
+        val deps = listOf(dep("here", "s1", "25609"), dep("across", "s2", "25565"), dep("bay", "s3", "25609"))
+        assertEquals(listOf("here", "bay"), TransitRepository.atStop(deps, "s1").map { it.tripId })
+        // A station's own id has no departures of its own: its bays all stay.
+        assertEquals(3, TransitRepository.atStop(deps, "station").size)
+    }
 }

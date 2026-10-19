@@ -455,14 +455,15 @@ class TransitRepository(
         val origin = calls.first().scheduledTime ?: parsed.originDeparture
         val call = LiveCalls.compute(timeline, origin, board, alight, v, now)
         // The Ministry predicts buses on their way; a ride later than that has no prediction to look up.
-        return if (call.best.isAfter(now.plusSeconds(PREDICTION_AHEAD_SEC))) call else withPrediction(call, leg.from, tripId, now)
+        return if (call.best.isAfter(now.plusSeconds(PREDICTION_AHEAD_SEC))) call else withPrediction(call, leg.from, tripId, leg.lineRef, now)
     }
 
-    /** [call] (trip [tripId] at [stop]) with the Ministry's predicted arrival there, when it has one. */
-    private suspend fun withPrediction(call: LiveCall, stop: StopCall, tripId: String, now: Instant): LiveCall {
+    /** [call] (trip [tripId] of line [lineRef] at [stop]) with the Ministry's predicted arrival there, when it has one. */
+    private suspend fun withPrediction(call: LiveCall, stop: StopCall, tripId: String, lineRef: String?, now: Instant): LiveCall {
         val code = stop.code ?: return call
-        val gtfs = TripIds.parse(tripId)?.gtfsTripId ?: return call
-        return LiveCalls.withPrediction(call, predictions?.at(code)?.get(gtfs), now)
+        val parsed = TripIds.parse(tripId) ?: return call
+        val p = predictions?.at(code)?.let { StopPredictions.find(it, parsed.gtfsTripId, lineRef, parsed.originDeparture) }
+        return LiveCalls.withPrediction(call, p, now)
     }
 
     /**
@@ -542,7 +543,7 @@ class TransitRepository(
                         null
                     }
                     val predicted = liveCall?.takeIf { d.scheduled.isBefore(now.plusSeconds(PREDICTION_AHEAD_SEC)) || it.status == LiveStatus.LIVE }
-                        ?.let { runCatching { withPrediction(it, d.stop, d.tripId, now) }.getOrNull() }
+                        ?.let { runCatching { withPrediction(it, d.stop, d.tripId, TripIds.lineRef(d.routeId), now) }.getOrNull() }
                     BoardEntry(d, predicted ?: liveCall)
                 }
             }.awaitAll().let { arrangeBoard(it, now) }

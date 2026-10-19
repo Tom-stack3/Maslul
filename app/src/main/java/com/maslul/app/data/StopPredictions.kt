@@ -17,8 +17,17 @@ class StopPredictions(
     private val base: String = "https://curlbus.app",
     private val clock: () -> Instant = Instant::now,
 ) {
-    /** When trip [gtfsTripId] (e.g. "22892643_181026") is expected at the stop, as of [recordedAt]. */
-    data class Prediction(val gtfsTripId: String, val eta: Instant, val recordedAt: Instant)
+    /**
+     * When trip [gtfsTripId] (e.g. "22892643_181026") of line [lineRef], which left its first stop
+     * at [origin], is expected at the stop, as of [recordedAt].
+     */
+    data class Prediction(
+        val gtfsTripId: String,
+        val eta: Instant,
+        val recordedAt: Instant,
+        val lineRef: String? = null,
+        val origin: Instant? = null,
+    )
 
     private class Entry(val at: Instant, val result: CompletableDeferred<Map<String, Prediction>>)
 
@@ -44,7 +53,13 @@ class StopPredictions(
     }
 
     @Serializable
-    class VisitDto(val trip_id: String? = null, val eta: String? = null, val timestamp: String? = null)
+    class VisitDto(
+        val trip_id: String? = null,
+        val eta: String? = null,
+        val timestamp: String? = null,
+        val route_id: String? = null,
+        val departed: String? = null,
+    )
 
     @Serializable
     class ResponseDto(val visits: Map<String, List<VisitDto>> = emptyMap())
@@ -65,9 +80,19 @@ class StopPredictions(
                 val trip = v.trip_id?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
                 val eta = time(v.eta) ?: return@mapNotNull null
                 val at = time(v.timestamp) ?: return@mapNotNull null
-                Prediction(trip, eta, at).takeIf { now.epochSecond - at.epochSecond <= MAX_AGE_SEC }
+                Prediction(trip, eta, at, v.route_id?.takeIf { it.isNotBlank() }, time(v.departed)).takeIf { now.epochSecond - at.epochSecond <= MAX_AGE_SEC }
             }
                 .groupBy { it.gtfsTripId }
                 .mapValues { (_, ps) -> ps.maxBy { it.recordedAt } }
+
+        /**
+         * The prediction for one trip among a stop's [predictions]. The Ministry's trip ids come from
+         * its own copy of the timetable, which isn't always the one Transitous loaded (on some days
+         * every id differs), so a trip is also found by its line and when it left its first stop.
+         */
+        fun find(predictions: Map<String, Prediction>, gtfsTripId: String, lineRef: String?, origin: Instant?): Prediction? =
+            predictions[gtfsTripId]
+                ?: if (lineRef == null || origin == null) null
+                else predictions.values.firstOrNull { it.lineRef == lineRef && it.origin == origin }
     }
 }

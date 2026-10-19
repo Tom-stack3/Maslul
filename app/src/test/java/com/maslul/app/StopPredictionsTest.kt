@@ -65,4 +65,21 @@ class StopPredictionsTest {
         assertEquals(LiveStatus.UNTRACKED, LiveCalls.withPrediction(call(LiveStatus.UNTRACKED), null, now).status)
         assertEquals(LiveStatus.UNTRACKED, LiveCalls.withPrediction(call(LiveStatus.UNTRACKED), prediction(-3), now).status)
     }
+
+    @Test
+    fun aTripIsFoundByLineAndDepartureWhenTheIdsDiffer() {
+        // On 19/10 the Ministry and Transitous had different copies of the timetable: line 172 leaving
+        // at 22:46 was 586193701 to one and 586193699 to the other.
+        val visits = listOf(
+            StopPredictions.VisitDto("586193701_191026", "2026-10-19 23:29:00+03:00", "2026-10-19 23:27:00+03:00", "9809", "2026-10-19 22:46:00+03:00"),
+            StopPredictions.VisitDto("4086321_191026", "2026-10-19 23:30:00+03:00", "2026-10-19 23:27:10+03:00", "9809", "2026-10-19 23:00:00+03:00"),
+        )
+        val ps = StopPredictions.parse(visits, Instant.parse("2026-10-19T20:27:30Z"))
+        val left = Instant.parse("2026-10-19T19:46:00Z")
+        assertEquals("586193701_191026", StopPredictions.find(ps, "586193699_191026", "9809", left)?.gtfsTripId)
+        // The same id still wins; another line or another departure finds nothing.
+        assertEquals("4086321_191026", StopPredictions.find(ps, "4086321_191026", null, null)?.gtfsTripId)
+        assertEquals(null, StopPredictions.find(ps, "586193699_191026", "9810", left))
+        assertEquals(null, StopPredictions.find(ps, "586193699_191026", "9809", left.plusSeconds(60)))
+    }
 }

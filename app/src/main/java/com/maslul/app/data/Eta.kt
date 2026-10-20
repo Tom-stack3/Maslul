@@ -178,13 +178,14 @@ object LiveCalls {
     private const val UNPASS_SEC = 120L
 
     /**
-     * Timed against where the buses really were (two evenings, 220 arrivals at 13 stops across the
-     * country), the Ministry's predictions come out about 2 minutes early, and our own about one for
-     * a bus under a quarter of an hour away. The corrections stay under that, so a bus beats the time
-     * shown no more often than before: about one time in four.
+     * Timed against where the buses really were (about 800 arrivals at 12 stops across the country:
+     * three weekday evenings, 21:00 to midnight, and a morning and a late morning, 09:00 and 11:00),
+     * the Ministry's predictions come out 2 to 3 minutes early at night and 3 to 6 by day, and our
+     * own 1 to 2 for a bus under a quarter of an hour away. The corrections stay well under that, so
+     * a bus beats the time shown about as often as it did before them (10% of the time, was 9%).
      */
-    const val MINISTRY_EARLY_SEC = 90L
-    const val ESTIMATE_EARLY_SEC = 30L
+    const val MINISTRY_EARLY_SEC = 60L
+    const val ESTIMATE_EARLY_SEC = 60L
     private const val ESTIMATE_EARLY_UNDER_SEC = 15 * 60L
 
     /** When a bus the Ministry expects at [eta] is really due. */

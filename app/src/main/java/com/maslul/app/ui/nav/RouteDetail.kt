@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AlarmAdd
+import androidx.compose.material.icons.rounded.AltRoute
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Fullscreen
@@ -122,7 +123,18 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import com.maslul.app.i18n.S
 
-class RouteDetailModel(nav: AppNav, private val original: Itinerary, val from: Place, val to: Place) : ScreenModel(nav) {
+class RouteDetailModel(
+    nav: AppNav,
+    private val original: Itinerary,
+    val from: Place,
+    val to: Place,
+    /** Opens straight on the other ways from here (from a "you may miss" alert). */
+    openReroute: Boolean = false,
+) : ScreenModel(nav) {
+    /** Showing the other ways from where the user is now. */
+    var rerouting by mutableStateOf(openReroute)
+    val reroute = RerouteState(this)
+
     /** Live state of every ride option, by [Leg.rideKey]. */
     val rideLive = mutableStateMapOf<String, LiveCall>()
     val approach = mutableStateMapOf<Int, LiveApproach>()
@@ -322,6 +334,7 @@ fun RouteDetailScreen(model: RouteDetailModel) {
                                 else model.remind(ctx)
                             },
                             onShare = { model.share(ctx) },
+                            onReroute = { model.rerouting = true },
                         )
                     }
                     if (isActive) active?.state?.let { st ->
@@ -377,6 +390,7 @@ fun RouteDetailScreen(model: RouteDetailModel) {
                         onClose = { model.following = null },
                     )
                 }
+                if (model.rerouting) RerouteSheet(model.reroute, now) { model.rerouting = false }
                 if (mapOnly) {
                     ExtendedFloatingActionButton(
                         onClick = { scope.launch { sheet.partialExpand() } },
@@ -464,7 +478,14 @@ private fun RouteMap(model: RouteDetailModel, modifier: Modifier, padding: Paddi
 }
 
 @Composable
-private fun DetailHeader(itin: Itinerary, active: Boolean, onStart: () -> Unit, onRemind: () -> Unit, onShare: () -> Unit) {
+private fun DetailHeader(
+    itin: Itinerary,
+    active: Boolean,
+    onStart: () -> Unit,
+    onRemind: () -> Unit,
+    onShare: () -> Unit,
+    onReroute: () -> Unit,
+) {
     Column(Modifier.padding(horizontal = 20.dp).padding(top = 4.dp, bottom = 8.dp)) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text("${Fmt.time(itin.start)} ${S.arrow} ${Fmt.time(itin.end)}", style = MaterialTheme.typography.headlineSmall.merge(Numeric))
@@ -487,10 +508,19 @@ private fun DetailHeader(itin: Itinerary, active: Boolean, onStart: () -> Unit, 
                 Spacer(Modifier.width(6.dp))
                 Text(if (active) S.end else S.start)
             }
-            FilledTonalButton(onClick = onRemind, shape = CircleShape, modifier = Modifier.height(46.dp)) {
-                Icon(Icons.Rounded.AlarmAdd, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(S.remindMe)
+            // On the way, a reminder to leave is past: other ways from here are what's useful.
+            if (active) {
+                FilledTonalButton(onClick = onReroute, shape = CircleShape, modifier = Modifier.height(46.dp).testTag("reroute_button")) {
+                    Icon(Icons.Rounded.AltRoute, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(S.otherWays)
+                }
+            } else {
+                FilledTonalButton(onClick = onRemind, shape = CircleShape, modifier = Modifier.height(46.dp)) {
+                    Icon(Icons.Rounded.AlarmAdd, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(S.remindMe)
+                }
             }
             OutlinedButton(onClick = onShare, shape = CircleShape, modifier = Modifier.height(46.dp)) {
                 Icon(Icons.Rounded.Share, S.share, Modifier.size(18.dp))

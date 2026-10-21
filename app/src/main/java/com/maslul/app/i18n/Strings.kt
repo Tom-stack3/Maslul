@@ -204,6 +204,36 @@ abstract class Strings {
     abstract fun leaveAt(time: String): String
     abstract fun rideFromAt(ride: String, stop: String, time: String): String
     abstract fun timeToGoTo(place: String): String
+
+    // Trip alerts: a saved trip watched around the time it's usually taken.
+    abstract val tripAlerts: String
+    abstract val tripAlertsHint: String
+    abstract val tripAlertsOn: String
+    abstract val usualDeparture: String
+    abstract val onDays: String
+    abstract fun alertsAt(time: String): String
+    abstract val exactAlarmsHint: String
+    abstract val allow: String
+    abstract val ok: String
+    abstract val checkingTrip: String
+    abstract fun alertArrive(time: String): String
+    abstract fun leaveEarlierTo(min: Long, place: String): String
+    abstract fun runningLate(ride: String, min: Long): String
+    abstract fun noServiceTo(place: String): String
+    abstract fun nextRideAt(ride: String, time: String): String
+    abstract val nothingSoon: String
+
+    // Re-route: other ways from where you are, during a trip.
+    abstract val otherWays: String
+    abstract val otherWaysFromHere: String
+    abstract val updatedEveryMinute: String
+    abstract fun yourWayArrives(time: String): String
+    abstract fun arrivesAt(time: String): String
+    abstract val takeThisWay: String
+    abstract val noBetterWay: String
+    abstract val lookingForWays: String
+    abstract fun mayMiss(ride: String): String
+    abstract val tapForOtherWays: String
     abstract fun reminderSet(time: String, minutes: Int): String
     abstract val reminderTooSoon: String
     abstract fun shareTitle(place: String, start: String, end: String, duration: String): String

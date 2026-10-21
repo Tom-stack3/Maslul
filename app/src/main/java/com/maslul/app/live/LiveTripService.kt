@@ -11,11 +11,15 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
+import com.maslul.app.MainActivity
 import com.maslul.app.MaslulApp
 import com.maslul.app.R
+import com.maslul.app.data.Combine
 import com.maslul.app.data.GeoPoint
 import com.maslul.app.data.Itinerary
+import com.maslul.app.data.Leg
 import com.maslul.app.data.LiveCall
+import com.maslul.app.ui.nav.rideName
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -84,6 +88,9 @@ class LiveTripService : LifecycleService() {
                 notify(NOTIF_ID, ongoing(state.title, state.text, state.progress))
             }
             if (state.alert != null && state.alertKey != null && fired.add(state.alertKey)) alert(state)
+            // A ride running late enough to miss the next one: say so, and offer the other ways from here.
+            missedConnection(session.itinerary, now) { l -> session.itinerary.legs.indexOfFirst { it === l }.takeIf { it >= 0 }?.let(live::get) }
+                ?.let { i -> if (fired.add("miss-$i")) alertMiss(session.itinerary.legs[i]) }
             if (state.finished) {
                 delay(60_000)
                 stop()
@@ -108,6 +115,7 @@ class LiveTripService : LifecycleService() {
             .setSilent(true)
             .setProgress(100, (progress * 100).toInt(), false)
             .setContentIntent(Notifs.openAppIntent(this))
+            .addAction(0, S.otherWays, rerouteIntent(this))
             .addAction(0, S.endTrip, stopPi)
             .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
             .build()
@@ -128,6 +136,21 @@ class LiveTripService : LifecycleService() {
         runCatching { NotificationManagerCompat.from(this).notify(ALERT_ID, n) }
     }
 
+    private fun alertMiss(leg: Leg) {
+        if (!Notifs.canPost(this)) return
+        val n = NotificationCompat.Builder(this, Notifs.CH_ALERT)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(S.mayMiss(rideName(leg)))
+            .setContentText(S.tapForOtherWays)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
+            .setContentIntent(rerouteIntent(this))
+            .setAutoCancel(true)
+            .setTimeoutAfter(10 * 60_000)
+            .build()
+        runCatching { NotificationManagerCompat.from(this).notify(ALERT_ID, n) }
+    }
+
     private fun stop() {
         loop?.cancel()
         ActiveTrip._session.value = null
@@ -139,6 +162,28 @@ class LiveTripService : LifecycleService() {
         private const val NOTIF_ID = 41
         private const val ALERT_ID = 42
         private const val ACTION_STOP = "stop"
+        /** Opens the live trip on the other ways from here. */
+        const val EXTRA_REROUTE = "reroute"
+
+        fun rerouteIntent(ctx: Context): PendingIntent = PendingIntent.getActivity(
+            ctx, 2,
+            Intent(ctx, MainActivity::class.java).putExtra(EXTRA_REROUTE, true)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+        /**
+         * The leg of [itin] whose ride can't be caught any more as the rides before it are expected
+         * to run ([liveOf]), if any. Only rides after the first: before boarding, walking faster helps.
+         */
+        fun missedConnection(itin: Itinerary, now: Instant, liveOf: (Leg) -> LiveCall?): Int? {
+            val transit = itin.legs.indices.filter { itin.legs[it].mode.isTransit }
+            return transit.drop(1).firstOrNull { i ->
+                val leg = itin.legs[i]
+                leg.start.isAfter(now.minusSeconds(60)) &&
+                    !Combine.catchable(leg, liveOf(leg), Combine.reachBy(itin, i, now, liveOf = liveOf))
+            }
+        }
 
         fun start(ctx: Context, itinerary: Itinerary, destination: String) {
             ActiveTrip._session.value = ActiveTrip.Session(itinerary, destination)

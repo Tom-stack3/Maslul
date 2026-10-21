@@ -41,6 +41,7 @@ import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.SwapCalls
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.WarningAmber
@@ -802,6 +803,7 @@ fun RoutesScreen(model: RoutesModel) {
 private fun SaveMenu(model: RoutesModel, data: UserData) {
     var open by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf<FavoriteDraft?>(null) }
+    var alerting by remember { mutableStateOf(false) }
     val tripSaved = data.savedTrips.any { it.from.key == model.from.key && it.to.key == model.to.key }
     // A trip from the bus you're on now isn't one to come back to.
     val canSaveTrip = model.from.kind != PlaceKind.ON_BOARD
@@ -822,6 +824,12 @@ private fun SaveMenu(model: RoutesModel, data: UserData) {
                     leadingIcon = { Icon(Icons.Rounded.SwapCalls, null) },
                     onClick = { open = false; model.toggleSaved() },
                 )
+                DropdownMenuItem(
+                    text = { Text(data.savedTrips.firstOrNull { it.from.key == model.from.key && it.to.key == model.to.key }?.alertLabel() ?: S.tripAlerts) },
+                    leadingIcon = { Icon(Icons.Rounded.NotificationsActive, null) },
+                    onClick = { open = false; alerting = true },
+                    modifier = Modifier.testTag("trip_alerts_item"),
+                )
             }
             if (canFavorite) {
                 DropdownMenuItem(
@@ -838,6 +846,12 @@ private fun SaveMenu(model: RoutesModel, data: UserData) {
         }
     }
     FavoriteDialogHost(model.store, draft) { draft = null }
+    if (alerting) {
+        // The time searched for, else the next five minutes from now: the likely usual departure.
+        val suggested = (model.time?.toLocalTime() ?: java.time.LocalTime.now(IsraelZone).plusMinutes(5))
+            .let { it.withMinute(it.minute / 5 * 5).withSecond(0).withNano(0) }
+        TripAlertDialog(model.store, SavedTrip(model.from, model.to), suggested) { alerting = false }
+    }
 }
 
 @Composable

@@ -1,5 +1,6 @@
 package com.maslul.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -48,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import com.maslul.app.data.Place
 import com.maslul.app.data.PlaceKind
 import com.maslul.app.live.ActiveTrip
+import com.maslul.app.live.TripWatcher
 import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
 import com.maslul.app.ui.Tab
@@ -114,6 +116,25 @@ class MainActivity : ComponentActivity() {
                     AppShell(nav)
                 }
             }
+        }
+        openFrom(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        openFrom(intent)
+    }
+
+    /** A trip alert tapped: the ways there now. */
+    private fun openFrom(intent: Intent?) {
+        val key = intent?.getStringExtra(TripWatcher.EXTRA_TRIP) ?: return
+        intent.removeExtra(TripWatcher.EXTRA_TRIP)
+        val trip = MaslulApp.instance.store.data.value.savedTrips.firstOrNull { it.key == key } ?: return
+        if (nav.tab == Tab.SIMPLE) {
+            nav.push(SimpleRoutesModel(nav, trip.to, trip.label ?: trip.to.name))
+        } else {
+            nav.selectTab(Tab.NAVIGATE)
+            nav.push(RoutesModel(nav, trip.from, trip.to))
         }
     }
 }

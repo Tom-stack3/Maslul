@@ -6,6 +6,7 @@ import com.maslul.app.data.TransitRepository
 import com.maslul.app.data.UserStore
 import com.maslul.app.data.languageOrDefault
 import com.maslul.app.i18n.L10n
+import com.maslul.app.live.TripWatcher
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -31,6 +32,10 @@ class MaslulApp : Application() {
         // Picking another language (or mode) switches the words everywhere, notifications included.
         MainScope().launch {
             store.data.map { it.settings.language to it.settings.simpleMode }.distinctUntilChanged().collect { applyLanguage() }
+        }
+        // A trip's alert set, changed or removed: its next check moves with it.
+        MainScope().launch {
+            store.data.map { d -> d.savedTrips.map { it.key to it.alert } }.distinctUntilChanged().collect { TripWatcher.scheduleAll(this@MaslulApp) }
         }
     }
 

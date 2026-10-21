@@ -63,6 +63,10 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Work
 import androidx.compose.material.icons.rounded.SwapCalls
+import androidx.compose.material.icons.rounded.NotificationAdd
+import androidx.compose.material.icons.rounded.NotificationsActive
+import com.maslul.app.data.UserStore
+import java.time.LocalTime
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -362,7 +366,7 @@ private fun HomePlaces(model: NavHomeModel, data: UserData) {
     }
     if (data.savedTrips.isNotEmpty()) {
         SectionHeader(S.savedTrips)
-        data.savedTrips.forEach { t -> SavedTripRow(t) { model.planTo(t.to, t.from) } }
+        data.savedTrips.forEach { t -> SavedTripRow(t, model.store) { model.planTo(t.to, t.from) } }
     }
     SectionHeader(S.recent)
     if (data.recents.isEmpty()) {
@@ -454,12 +458,23 @@ private fun AddFavoriteChip(text: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun SavedTripRow(t: SavedTrip, onClick: () -> Unit) {
+private fun SavedTripRow(t: SavedTrip, store: UserStore, onClick: () -> Unit) {
+    var alerting by remember { mutableStateOf(false) }
     PlaceRow(
         title = t.label ?: t.to.name,
-        subtitle = S.fromPlace(t.from.shownName),
+        subtitle = listOfNotNull(S.fromPlace(t.from.shownName), t.alertLabel()).joinToString(" · "),
         icon = Icons.Rounded.SwapCalls,
         iconTint = MaterialTheme.colorScheme.primary,
+        trailing = {
+            IconButton(onClick = { alerting = true }, modifier = Modifier.testTag("trip_alert_bell")) {
+                Icon(
+                    if (t.alert?.enabled == true) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationAdd,
+                    S.tripAlerts,
+                    tint = if (t.alert?.enabled == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
         onClick = onClick,
     )
+    if (alerting) TripAlertDialog(store, t, LocalTime.of(8, 0)) { alerting = false }
 }

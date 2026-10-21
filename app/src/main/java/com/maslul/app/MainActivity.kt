@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import com.maslul.app.data.Place
 import com.maslul.app.data.PlaceKind
 import com.maslul.app.live.ActiveTrip
+import com.maslul.app.live.LiveTripService
 import com.maslul.app.live.TripWatcher
 import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
@@ -125,8 +126,18 @@ class MainActivity : ComponentActivity() {
         openFrom(intent)
     }
 
-    /** A trip alert tapped: the ways there now. */
+    /** A trip alert tapped: the ways there now. "Other ways" on the live trip: those, from here. */
     private fun openFrom(intent: Intent?) {
+        if (intent?.getBooleanExtra(LiveTripService.EXTRA_REROUTE, false) == true) {
+            intent.removeExtra(LiveTripService.EXTRA_REROUTE)
+            val s = ActiveTrip.session.value ?: return
+            val legs = s.itinerary.legs
+            val from = legs.first().from.let { Place(it.name.ifBlank { S.start }, it.lat, it.lon, kind = PlaceKind.PIN) }
+            val to = legs.last().to.let { Place(s.destination, it.lat, it.lon, kind = PlaceKind.PIN) }
+            if (nav.tab != Tab.SIMPLE) nav.selectTab(Tab.NAVIGATE)
+            nav.push(RouteDetailModel(nav, s.itinerary, from, to, openReroute = true))
+            return
+        }
         val key = intent?.getStringExtra(TripWatcher.EXTRA_TRIP) ?: return
         intent.removeExtra(TripWatcher.EXTRA_TRIP)
         val trip = MaslulApp.instance.store.data.value.savedTrips.firstOrNull { it.key == key } ?: return

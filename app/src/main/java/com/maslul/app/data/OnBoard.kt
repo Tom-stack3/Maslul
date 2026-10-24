@@ -48,12 +48,19 @@ object OnBoard {
 
     /**
      * How far from you a vehicle you're on can be reported: its position is up to a couple of
-     * minutes old, and a bus covers ~14 m/s.
+     * minutes old, and an intercity bus on the highway covers ~25 m/s. Its reported speed when
+     * it's faster still; ~20 m/s when it has none.
      */
     fun reach(v: Vehicle, now: Instant): Double {
         val age = (now.epochSecond - v.recordedAt.epochSecond).coerceAtLeast(0)
-        return 350.0 + minOf(1500.0, age * 14.0)
+        val speed = maxOf(DEFAULT_MPS, (v.velocityKmh ?: 0) / 3.6)
+        return 350.0 + minOf(4000.0, age * speed)
     }
+
+    private const val DEFAULT_MPS = 20.0
+
+    /** Whether [q] is a line number ("125", "1א") rather than a destination: those are found anywhere. */
+    fun isLineNumber(q: String) = q.any(Char::isDigit) && q.all { it.isDigit() || it in 'א'..'ת' }
 
     /** Live vehicles within [reach] of [here], nearest first. */
     fun nearVehicles(here: GeoPoint, byLine: Map<String, List<Vehicle>>, now: Instant): List<Vehicle> =
@@ -94,6 +101,19 @@ object OnBoard {
         }
         return out.values.map { it.second }
     }
+
+    /** A live vehicle of [route] not known from the timetable around you: its trip is looked up when picked. */
+    fun tracked(route: LineRoute, v: Vehicle, here: GeoPoint) = BoardCandidate(
+        null, v.lineRef, route.label, route.mode, placeName(route.destination), route.agency, route.operatorRef.toString(), null, v,
+        GeoMath.distance(here, v.point), bearing = v.bearing,
+    )
+
+    /** Live vehicles of [routes] (a line's directions and alternatives), wherever they are; nearest first. */
+    fun ofLine(here: GeoPoint, routes: List<LineRoute>, byLine: Map<String, List<Vehicle>>, max: Int = 12): List<BoardCandidate> =
+        routes.distinctBy { it.lineRef }
+            .flatMap { r -> byLine[r.lineRef.toString()].orEmpty().map { tracked(r, it, here) } }
+            .sortedBy { it.distanceM }
+            .take(max)
 
     /** [name], unless it's a code rather than a place (trains are signed with their number: "785"). */
     fun placeName(name: String) = name.takeIf { n -> n.any(Char::isLetter) }.orEmpty()

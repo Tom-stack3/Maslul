@@ -285,6 +285,10 @@ abstract class Strings {
     abstract val noRidesAround: String
     abstract val noRidesAroundHint: String
     abstract val nothingMatchesRides: String
+    abstract fun lineAnywhere(line: String): String
+    abstract val lineAnywhereHint: String
+    abstract fun lookingForLine(line: String): String
+    abstract fun noLiveOfLine(line: String): String
     abstract val onBoardFooter: String
     abstract fun liveFromYou(distance: String): String
     abstract fun dueAt(stop: String): String

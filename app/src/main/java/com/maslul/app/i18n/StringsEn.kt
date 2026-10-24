@@ -340,8 +340,12 @@ internal object English : Strings() {
     override val lookingForRides = "Looking for rides around you…"
     override val cantTellRide = "Can't tell which ride"
     override val noRidesAround = "No rides found around you"
-    override val noRidesAroundHint = "Rides show up here while you're on a bus or train, or at a stop one is due at."
+    override val noRidesAroundHint = "Rides show up here while you're on a bus or train, or at a stop one is due at. Not here? Type its line number to find it anywhere."
     override val nothingMatchesRides = "Nothing matches. Clear the filter to see every ride around you."
+    override fun lineAnywhere(line: String) = "Line $line anywhere"
+    override val lineAnywhereHint = "Where a bus reports itself can lag behind: if yours looks far away, pick it anyway."
+    override fun lookingForLine(line: String) = "Looking for line $line…"
+    override fun noLiveOfLine(line: String) = "No bus of line $line is reporting where it is right now."
     override val onBoardFooter = "Live buses closest to you come first. After you pick one, the trip is planned from its next stop: " +
         "stay on, or where to get off and change. Rides going the other way from you come last."
     override fun liveFromYou(distance: String) = "Live · $distance from you"

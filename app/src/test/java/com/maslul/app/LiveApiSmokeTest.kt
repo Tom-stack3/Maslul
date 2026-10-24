@@ -178,4 +178,20 @@ class LiveApiSmokeTest {
         assertTrue(repo.worthLive(ride(v.journeyRef!!), now))
         assertFalse(repo.worthLive(ride("1", lineRef = "999999999"), now))
     }
+
+    @Test
+    fun findsALinesBusesAnywhereAndTheirTrips() = runBlocking {
+        // A bus at highway speed is between cities, where no stop near it lists it: its trip comes from where it set off.
+        val v = repo.live.snapshot()?.byLine?.values?.flatten()?.firstOrNull { (it.velocityKmh ?: 0) >= 70 && it.journeyRef != null }
+        Assume.assumeNotNull(v) // e.g. on Shabbat
+        val label = repo.lineRoute("il-Israel-MOT_${v!!.lineRef}")?.label
+        Assume.assumeNotNull(label)
+        val found = repo.boardLine(v.point, label!!)
+        println("$label: ${found.map { "${it.headsign} ${(it.distanceM / 1000).toInt()} km" }}")
+        assertTrue(found.isNotEmpty() && found.all { it.lineLabel == label && it.live })
+        assertTrue(found.zipWithNext().all { (a, b) -> a.distanceM <= b.distanceM })
+        val trips = found.take(3).map { repo.boardTripId(it) }
+        println("trips: $trips")
+        assertTrue(trips.any { it != null && repo.trip(it) != null })
+    }
 }

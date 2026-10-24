@@ -362,8 +362,12 @@ internal object Hebrew : Strings() {
     override val lookingForRides = "מחפשים נסיעות סביבכם…"
     override val cantTellRide = "לא ברור באיזו נסיעה"
     override val noRidesAround = "לא נמצאו נסיעות סביבכם"
-    override val noRidesAroundHint = "נסיעות מופיעות כאן כשאתם באוטובוס או ברכבת, או בתחנה שאחד מהם אמור להגיע אליה."
+    override val noRidesAroundHint = "נסיעות מופיעות כאן כשאתם באוטובוס או ברכבת, או בתחנה שאחד מהם אמור להגיע אליה. לא מופיעה? הקלידו את מספר הקו כדי למצוא אותה בכל מקום."
     override val nothingMatchesRides = "אין התאמות. נקו את הסינון כדי לראות את כל הנסיעות סביבכם."
+    override fun lineAnywhere(line: String) = "קו $line בכל מקום"
+    override val lineAnywhereHint = "המיקום שאוטובוס מדווח עלול לפגר: אם שלכם נראה רחוק, בחרו בו בכל זאת."
+    override fun lookingForLine(line: String) = "מחפשים את קו $line…"
+    override fun noLiveOfLine(line: String) = "אף אוטובוס של קו $line לא מדווח כרגע על מיקומו."
     override val onBoardFooter = "אוטובוסים בזמן אמת הקרובים אליכם מופיעים ראשונים. אחרי שבוחרים, המסלול מתוכנן מהתחנה הבאה: " +
         "להישאר, או איפה לרדת ולהחליף. נסיעות בכיוון ההפוך מכם מופיעות בסוף."
     override fun liveFromYou(distance: String) = "בזמן אמת · $distance מכם"

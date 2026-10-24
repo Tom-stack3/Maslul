@@ -340,12 +340,20 @@ class TransitRepository(
             val today = LocalDate.now(IsraelZone)
             stride.routesByLineRef(refs, today).ifEmpty { stride.routesByLineRef(refs, today.minusDays(1)) }
         }.getOrDefault(emptyList()).associateBy { it.lineRef.toString() }
-        val tracked = loose.mapNotNull { v ->
-            val r = routes[v.lineRef] ?: return@mapNotNull null
-            BoardCandidate(null, v.lineRef, r.label, r.mode, OnBoard.placeName(r.destination), r.agency, r.operatorRef.toString(), null, v,
-                GeoMath.distance(here, v.point), bearing = v.bearing)
-        }
+        val tracked = loose.mapNotNull { v -> routes[v.lineRef]?.let { OnBoard.tracked(it, v, here) } }
         OnBoard.rank(timetabled + tracked, now)
+    }
+
+    /**
+     * Live vehicles of line [number] wherever they are, nearest to [here] first: for the ride
+     * you're on when its reported position is too far behind to be found around you.
+     */
+    suspend fun boardLine(here: GeoPoint, number: String): List<BoardCandidate> = coroutineScope {
+        val snapshot = async { live.snapshot() }
+        val today = LocalDate.now(IsraelZone)
+        val routes = stride.searchRoutes(number, today).ifEmpty { stride.searchRoutes(number, today.minusDays(1)) }
+            .filter { it.label == number }
+        OnBoard.ofLine(here, routes, snapshot.await()?.byLine.orEmpty())
     }
 
     /** The Transitous trip of [c] (a live vehicle's, found through the stop it's heading to), or null. */
@@ -365,6 +373,28 @@ class TransitRepository(
                     TripIds.parse(d.tripId)?.let { Math.abs(it.originDeparture.epochSecond - v.originDeparture.epochSecond) < 60 } == true
                 }
             if (match != null) return match.tripId
+        }
+        return runCatching { vehicleTripId(v) }.getOrNull()
+    }
+
+    /**
+     * [v]'s Transitous trip, from the departures at its line's first stops when it set off: for a
+     * bus no stop near it lists, like one on the highway between cities.
+     */
+    private suspend fun vehicleTripId(v: Vehicle): String? {
+        val ref = v.lineRef.toLongOrNull() ?: return null
+        val day = v.originDeparture.atZone(IsraelZone).toLocalDate()
+        val route = stride.routesByLineRef(listOf(ref), day).firstOrNull()
+            ?: stride.routesByLineRef(listOf(ref), day.minusDays(1)).firstOrNull() ?: return null
+        val stops = patternStops(route, LocalDate.parse(route.date))?.first ?: return null
+        val ride = Ride(v.journeyRef.orEmpty(), v.originDeparture)
+        // A terminus where boarding isn't allowed lists no departures: then the second stop.
+        for (i in 0..minOf(1, stops.lastIndex)) {
+            val stopId = transitStop(stops[i])?.stopId ?: continue
+            val deps = runCatching {
+                transitous.stopTimes(stopId, time = ride.departure.plusSeconds(stops[i].offsetSec - 60), count = 20, language = language)
+            }.getOrNull().orEmpty()
+            matchTripId(deps, ride, ref, stops[i].offsetSec)?.let { return it }
         }
         return null
     }

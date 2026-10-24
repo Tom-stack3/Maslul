@@ -363,8 +363,12 @@ internal object Russian : Strings() {
     override val lookingForRides = "Ищем транспорт рядом с вами…"
     override val cantTellRide = "Не удаётся определить рейс"
     override val noRidesAround = "Рядом с вами транспорта не найдено"
-    override val noRidesAroundHint = "Здесь появляются рейсы, когда вы в автобусе или поезде, или на остановке, к которой он подъезжает."
+    override val noRidesAroundHint = "Здесь появляются рейсы, когда вы в автобусе или поезде, или на остановке, к которой он подъезжает. Нет вашего? Введите номер линии, чтобы найти его где угодно."
     override val nothingMatchesRides = "Ничего не подходит. Сбросьте фильтр, чтобы увидеть весь транспорт рядом."
+    override fun lineAnywhere(line: String) = "Линия $line везде"
+    override val lineAnywhereHint = "Автобус может сообщать своё место с опозданием: если ваш кажется далеко, всё равно выберите его."
+    override fun lookingForLine(line: String) = "Ищем линию $line…"
+    override fun noLiveOfLine(line: String) = "Сейчас ни один автобус линии $line не сообщает, где он."
     override val onBoardFooter = "Сначала — ближайшие к вам автобусы онлайн. Когда выберете, маршрут строится от следующей остановки: " +
         "ехать дальше или где выйти и пересесть. Рейсы в обратную сторону — в конце списка."
     override fun liveFromYou(distance: String) = "Онлайн · $distance от вас"

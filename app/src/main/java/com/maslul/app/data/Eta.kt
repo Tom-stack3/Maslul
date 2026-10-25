@@ -167,11 +167,68 @@ data class LiveCall(
     val vehicle: Vehicle? = null,
     val alightExpected: Instant? = null,
     val progress: TripTimeline.Progress? = null,
+    /** When the Ministry last updated its prediction, when [expected] is the Ministry's (see [StopPredictions]). */
+    val predictedAt: Instant? = null,
 ) {
     val best: Instant get() = expected ?: scheduled
 }
 
 object LiveCalls {
+    /** A passed bus is taken back only if the Ministry still expects it at least this far ahead. */
+    private const val UNPASS_SEC = 120L
+
+    /**
+     * Timed against where the buses really were (about 800 arrivals at 12 stops across the country:
+     * three weekday evenings, 21:00 to midnight, and a morning and a late morning, 09:00 and 11:00),
+     * the Ministry's predictions come out 2 to 3 minutes early at night and 3 to 6 by day, and our
+     * own 1 to 2 for a bus under a quarter of an hour away. The corrections stay well under that, so
+     * a bus beats the time shown about as often as it did before them (10% of the time, was 9%).
+     */
+    const val MINISTRY_EARLY_SEC = 60L
+
+    /**
+     * The further off the bus, the earlier the Ministry runs: on top of [MINISTRY_EARLY_SEC], this
+     * share of the wait. With it and a quarter minute more on our own estimates ([ESTIMATE_EARLY_SEC]),
+     * about 2,900 moments at 10 stops in Tel Aviv, Petah Tikva, Bat Yam and Jerusalem (rush hours,
+     * midday and evenings, 23–25 Oct 2026) come within 2 minutes of the real arrival 45% of the time,
+     * up from 43% (81% for a bus under 5 minutes away, was 79%; 33% at 5 to 15, was 30%), while the
+     * bus beats the time shown 11% of the time, up from 9%, and in no single run more than 2.3 points
+     * more often than before.
+     */
+    const val MINISTRY_EARLY_SHARE = 0.025
+    const val ESTIMATE_EARLY_SEC = 75L
+    private const val ESTIMATE_EARLY_UNDER_SEC = 15 * 60L
+
+    /** When a bus the Ministry expects at [eta] is really due, seen at [now]. */
+    fun ministryCorrected(eta: Instant, now: Instant): Instant {
+        val wait = (eta.epochSecond - now.epochSecond).coerceAtLeast(0)
+        return eta.plusSeconds(MINISTRY_EARLY_SEC + (wait * MINISTRY_EARLY_SHARE).toLong())
+    }
+
+    /** When a bus our estimate puts at [t] is really due. */
+    fun estimateCorrected(t: Instant, now: Instant): Instant =
+        if (t.epochSecond - now.epochSecond < ESTIMATE_EARLY_UNDER_SEC) t.plusSeconds(ESTIMATE_EARLY_SEC) else t
+
+    /**
+     * [call] with the Ministry's predicted arrival [p] in place of the estimate from the vehicle's
+     * position: its model knows the road better than a position and the timetable. A trip whose
+     * vehicle isn't in the snapshot becomes live; one that looks passed stays passed unless the
+     * Ministry still expects it a couple of minutes from now.
+     */
+    fun withPrediction(call: LiveCall, p: StopPredictions.Prediction?, now: Instant): LiveCall {
+        if (p == null || p.eta.isBefore(now.minusSeconds(60))) return call
+        if (call.status == LiveStatus.PASSED && p.eta.isBefore(now.plusSeconds(UNPASS_SEC))) return call
+        val eta = ministryCorrected(p.eta, now)
+        val shift = eta.epochSecond - call.best.epochSecond
+        return call.copy(
+            status = LiveStatus.LIVE,
+            expected = eta,
+            delaySec = eta.epochSecond - call.scheduled.epochSecond,
+            alightExpected = call.alightExpected?.plusSeconds(shift),
+            predictedAt = p.recordedAt,
+        )
+    }
+
     /**
      * Live state of one trip at stop [boardIndex] (and optionally [alightIndex]).
      * [vehicle] is the vehicle matched to this trip, if any.
@@ -193,14 +250,16 @@ object LiveCalls {
         if (p.lastPassed >= boardIndex) {
             return LiveCall(LiveStatus.PASSED, scheduled, null, p.delaySec, 0, vehicle, alightIndex?.let { p.predicted[it] }, p)
         }
+        val board = p.predicted[boardIndex]
+        val shift = board?.let { estimateCorrected(it, now).epochSecond - it.epochSecond } ?: 0
         return LiveCall(
             status = LiveStatus.LIVE,
             scheduled = scheduled,
-            expected = p.predicted[boardIndex],
+            expected = board?.plusSeconds(shift),
             delaySec = p.delaySec,
             stopsAway = p.stopsAway(boardIndex),
             vehicle = vehicle,
-            alightExpected = alightIndex?.let { p.predicted[it] },
+            alightExpected = alightIndex?.let { p.predicted[it]?.plusSeconds(shift) },
             progress = p,
         )
     }

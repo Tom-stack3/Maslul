@@ -100,8 +100,9 @@ class EtaTest {
         val v = vehicle(1.5, t)
         val live = LiveCalls.compute(timeline, origin, 3, 4, v, t)
         assertEquals(LiveStatus.LIVE, live.status)
-        near(origin.plusSeconds(420), live.expected)
-        near(origin.plusSeconds(540), live.alightExpected)
+        // Our estimates run early for a bus this close: a minute and a quarter is added (see [LiveCalls.estimateCorrected]).
+        near(origin.plusSeconds(420 + LiveCalls.ESTIMATE_EARLY_SEC), live.expected)
+        near(origin.plusSeconds(540 + LiveCalls.ESTIMATE_EARLY_SEC), live.alightExpected)
         assertEquals(2, live.stopsAway)
 
         assertEquals(LiveStatus.PASSED, LiveCalls.compute(timeline, origin, 1, 4, v, t).status)
@@ -139,8 +140,8 @@ class EtaTest {
         assertEquals(LiveStatus.LIVE, liveA.status)
         assertEquals(a, liveA.vehicle)
         assertEquals(b, liveB.vehicle)
-        // A is ~1.5 km from the stop: arriving within a couple of minutes, not at B's 18:16.
-        assertTrue(liveA.best.isBefore(now.plusSeconds(4 * 60)))
+        // A is ~1.5 km from the stop: arriving within a few minutes, not at B's 18:16.
+        assertTrue(liveA.best.isBefore(now.plusSeconds(5 * 60)))
         assertTrue(liveA.best.isBefore(liveB.best))
 
         val board = TransitRepository.arrangeBoard(listOf(BoardEntry(depB, liveB), BoardEntry(depA, liveA)), now)
@@ -202,5 +203,17 @@ class EtaTest {
         // Line 1: the one whose time passed (it may be late) and the next three; line 2 both.
         assertEquals(setOf("t1--5", "t1-5", "t1-10", "t1-15", "t2-4", "t2-50"), kept.map { it.tripId }.toSet())
         assertEquals(6, kept.size)
+    }
+
+    @Test
+    fun boardShowsOnlyTheStopsOwnDepartures() {
+        val now = origin
+        fun dep(trip: String, stopId: String, code: String?) =
+            departure(trip, now.plusSeconds(300)).copy(stop = StopCall(stopId, "Center", code, 0.0, 0.0, null, now.plusSeconds(300)))
+        // This stop, the same-named one across the street, and another bay of this station.
+        val deps = listOf(dep("here", "s1", "25609"), dep("across", "s2", "25565"), dep("bay", "s3", "25609"))
+        assertEquals(listOf("here", "bay"), TransitRepository.atStop(deps, "s1").map { it.tripId })
+        // A station's own id has no departures of its own: its bays all stay.
+        assertEquals(3, TransitRepository.atStop(deps, "station").size)
     }
 }

@@ -1,6 +1,10 @@
 package com.maslul.app.data
 
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.Serializable
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -43,9 +47,22 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
         val maxDirectMinutes: Int? = null,
         /** Only the direct ([directModes]) route: no transit is searched. */
         val directOnly: Boolean = false,
+        /** How far from a street the endpoints may be (MOTIS default: 250 m); see [WIDE_MATCH_M]. */
+        val maxMatchingMeters: Int? = null,
     )
 
     suspend fun plan(req: PlanRequest): PlanResult {
+        val r = planOnce(req)
+        // Nothing at all, not even a walk: an endpoint inside a large closed area (a base, a campus)
+        // found no street to start from. Look for one further away before saying there's no way.
+        val atPoint = req.fromStopId == null || req.toStopId == null
+        if (r.itineraries.isEmpty() && r.walkOnly == null && r.carOnly == null && atPoint && req.maxMatchingMeters == null) {
+            return planOnce(req.copy(maxMatchingMeters = WIDE_MATCH_M))
+        }
+        return r
+    }
+
+    private suspend fun planOnce(req: PlanRequest): PlanResult {
         val url = base.toHttpUrl().newBuilder()
             .addPathSegments("api/v6/plan")
             .addQueryParameter("fromPlace", req.fromStopId ?: "${req.from.lat},${req.from.lon}")
@@ -65,13 +82,19 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
                 req.preTransitModes?.let { addQueryParameter("preTransitModes", it) }
                 req.directModes?.let { addQueryParameter("directModes", it) }
                 req.maxDirectMinutes?.let { addQueryParameter("maxDirectTime", (it * 60).toString()) }
+                // Otherwise a ride slower than walking there is dropped: a short trip offers the walk alone.
+                addQueryParameter("fastestDirectFactor", FASTEST_DIRECT_FACTOR.toString())
+                req.maxMatchingMeters?.let { addQueryParameter("maxMatchingDistance", it.toString()) }
+                // Changes walk the streets: otherwise 230 m between two stops is timed as one minute, and a
+                // bus stop with no listed link to the train station beside it can't connect to the train.
+                addQueryParameter("useRoutedTransfers", "true")
                 if (req.wheelchair) addQueryParameter("pedestrianProfile", "WHEELCHAIR")
                 req.maxTransfers?.let { addQueryParameter("maxTransfers", it.toString()) }
                 req.pageCursor?.let { addQueryParameter("pageCursor", it) }
                 req.language?.let { addQueryParameter("language", it) }
             }
             .build()
-        val dto = Http.getJson<PlanDto>(url)
+        val dto = planGate.withPermit { getPlan(url) }
         return PlanResult(
             itineraries = dto.itineraries.map { it.toDomain() }
                 // A lift is one drive: a car again after walking would need the car to be waiting there.
@@ -161,7 +184,34 @@ class TransitousApi(private val base: String = "https://api.transitous.org") {
         return Http.getJson<StopTimesDto>(url).stopTimes.mapNotNull { it.toDomain() }
     }
 
+    /** A plan request, tried again when Transitous turns it away for too many at once. */
+    private suspend fun getPlan(url: HttpUrl): PlanDto {
+        repeat(PLAN_RETRIES) { attempt ->
+            try {
+                return Http.getJson<PlanDto>(url)
+            } catch (e: HttpException) {
+                if (e.code != 429) throw e
+                delay(RETRY_DELAY_MS * (attempt + 1))
+            }
+        }
+        return Http.getJson<PlanDto>(url)
+    }
+
     companion object {
+        /**
+         * Transitous answers at most three plan requests from one address at a time and turns the
+         * rest away (HTTP 429), so a search's own lookups (other lines, a longer walk) would fail.
+         */
+        private val planGate = Semaphore(3)
+        private const val PLAN_RETRIES = 3
+        private const val RETRY_DELAY_MS = 700L
+
+        /** Rides up to this many times as long as walking there are still offered. */
+        const val FASTEST_DIRECT_FACTOR = 2.0
+
+        /** Street search radius when the default one found nothing near an endpoint. */
+        const val WIDE_MATCH_M = 500
+
         // Israel's GTFS has no platform_code; the platform and floor sit in stop_desc instead:
         // "רחוב: יהושע חנקין עיר: באר שבע רציף: 13  קומה: " (empty when the stop has none).
         private val PLATFORM = Regex("""רציף:\s*([^\s:]+)(?=\s|$)""")

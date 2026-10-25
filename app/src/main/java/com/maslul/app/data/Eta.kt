@@ -185,11 +185,25 @@ object LiveCalls {
      * a bus beats the time shown about as often as it did before them (10% of the time, was 9%).
      */
     const val MINISTRY_EARLY_SEC = 60L
-    const val ESTIMATE_EARLY_SEC = 60L
+
+    /**
+     * The further off the bus, the earlier the Ministry runs: on top of [MINISTRY_EARLY_SEC], this
+     * share of the wait. With it and a quarter minute more on our own estimates ([ESTIMATE_EARLY_SEC]),
+     * about 2,900 moments at 10 stops in Tel Aviv, Petah Tikva, Bat Yam and Jerusalem (rush hours,
+     * midday and evenings, 23–25 Oct 2026) come within 2 minutes of the real arrival 45% of the time,
+     * up from 43% (81% for a bus under 5 minutes away, was 79%; 33% at 5 to 15, was 30%), while the
+     * bus beats the time shown 11% of the time, up from 9%, and in no single run more than 2.3 points
+     * more often than before.
+     */
+    const val MINISTRY_EARLY_SHARE = 0.025
+    const val ESTIMATE_EARLY_SEC = 75L
     private const val ESTIMATE_EARLY_UNDER_SEC = 15 * 60L
 
-    /** When a bus the Ministry expects at [eta] is really due. */
-    fun ministryCorrected(eta: Instant): Instant = eta.plusSeconds(MINISTRY_EARLY_SEC)
+    /** When a bus the Ministry expects at [eta] is really due, seen at [now]. */
+    fun ministryCorrected(eta: Instant, now: Instant): Instant {
+        val wait = (eta.epochSecond - now.epochSecond).coerceAtLeast(0)
+        return eta.plusSeconds(MINISTRY_EARLY_SEC + (wait * MINISTRY_EARLY_SHARE).toLong())
+    }
 
     /** When a bus our estimate puts at [t] is really due. */
     fun estimateCorrected(t: Instant, now: Instant): Instant =
@@ -204,7 +218,7 @@ object LiveCalls {
     fun withPrediction(call: LiveCall, p: StopPredictions.Prediction?, now: Instant): LiveCall {
         if (p == null || p.eta.isBefore(now.minusSeconds(60))) return call
         if (call.status == LiveStatus.PASSED && p.eta.isBefore(now.plusSeconds(UNPASS_SEC))) return call
-        val eta = ministryCorrected(p.eta)
+        val eta = ministryCorrected(p.eta, now)
         val shift = eta.epochSecond - call.best.epochSecond
         return call.copy(
             status = LiveStatus.LIVE,

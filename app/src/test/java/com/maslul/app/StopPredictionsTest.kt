@@ -41,11 +41,11 @@ class StopPredictionsTest {
     @Test
     fun theMinistrysTimeReplacesTheEstimateAndMovesTheArrivalWithIt() {
         val c = LiveCalls.withPrediction(call(LiveStatus.LIVE, now.plusSeconds(240), alight = now.plusSeconds(900)), prediction(6), now)
-        // 6 minutes as the Ministry says, plus the minute it usually runs early.
-        val due = now.plusSeconds(360 + 60)
+        // 6 minutes as the Ministry says, plus the minute it usually runs early and 2.5% of the wait.
+        val due = now.plusSeconds(360 + 60 + 9)
         assertEquals(due, c.best)
-        assertEquals(now.plusSeconds(900 + 420 - 240), c.alightExpected)
-        assertEquals(120L, c.delaySec)
+        assertEquals(now.plusSeconds(900 + 429 - 240), c.alightExpected)
+        assertEquals(129L, c.delaySec)
         assertEquals(now.minusSeconds(20), c.recordedAt)
     }
 
@@ -53,7 +53,7 @@ class StopPredictionsTest {
     fun aTripWithoutAVehicleIsLiveWhenTheMinistryPredictsIt() {
         val c = LiveCalls.withPrediction(call(LiveStatus.UNTRACKED), prediction(8), now)
         assertEquals(LiveStatus.LIVE, c.status)
-        assertEquals(LiveCalls.ministryCorrected(now.plusSeconds(480)), c.best)
+        assertEquals(LiveCalls.ministryCorrected(now.plusSeconds(480), now), c.best)
         assertEquals(Freshness.LIVE, c.freshness(now))
     }
 

@@ -87,6 +87,7 @@ dependencies {
     implementation(libs.play.services.location)
     implementation(libs.brotli.dec)
     implementation(libs.gson)
+    implementation(libs.androidx.work.runtime.ktx)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

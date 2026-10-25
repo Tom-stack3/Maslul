@@ -441,6 +441,35 @@ class TransitRepository(
             ?.also { synchronized(tripCache) { tripCache[tripId] = it } }
     }
 
+    /**
+     * The best ways for [req] as a saved trip's alerts weigh them: when to leave to catch each one's first
+     * ride as it's expected (live where it's tracked) and when you'd get there.
+     */
+    suspend fun tripOptions(req: TransitousApi.PlanRequest, rail: RailPreference, now: Instant = Instant.now()): List<TripAlerts.Option> =
+        coroutineScope {
+            val found = plan(req).itineraries.sortedBy { Ranking.score(it, false, req.walkSpeedMps, rail) }
+            Ranking.rank(Combine.merge(found), false, req.walkSpeedMps, rail)
+                .filter { it.firstTransit != null }
+                .take(TRIP_OPTIONS)
+                .map { itin -> async { runCatching { tripOption(itin, now) }.getOrNull() } }
+                .awaitAll().filterNotNull()
+        }
+
+    private suspend fun tripOption(itin: Itinerary, now: Instant): TripAlerts.Option? {
+        val i = itin.legs.indexOfFirst { it.mode.isTransit }.takeIf { it >= 0 } ?: return null
+        val first = itin.legs[i]
+        val call = if (first.start.isBefore(now.plusSeconds(PREDICTION_AHEAD_SEC))) legLive(first, now) else null
+        val live = call?.status == LiveStatus.LIVE
+        val board = Combine.boards(first, call)
+        val walk = itin.legs.subList(0, i).sumOf { it.durationSec }
+        val arrive = Combine.expected(itin) { l -> if (l.rideKey == first.rideKey) call else null }.end
+        return TripAlerts.Option(
+            leaveAt = board.minusSeconds(walk), arriveAt = arrive, line = first.lineLabel, mode = first.mode,
+            boardAt = board, stop = first.from.name, live = live,
+            lateMinutes = if (live) (call!!.delaySec / 60).coerceAtLeast(0) else 0,
+        )
+    }
+
     /** Live state of a transit leg: where its vehicle is and when it reaches the boarding stop. */
     suspend fun legLive(leg: Leg, now: Instant = Instant.now()): LiveCall? {
         val tripId = leg.tripId ?: return null
@@ -735,6 +764,9 @@ class TransitRepository(
         /** Requests at once when trying several starting points (see [onward]). */
         private const val FAN_OUT = 2
         private const val ONWARD_TIMEOUT_MS = 15_000L
+
+        /** Ways weighed for a saved trip's alerts. */
+        private const val TRIP_OPTIONS = 6
 
         /** Rides due within this long are looked up in the Ministry's predictions (see [StopPredictions]). */
         const val PREDICTION_AHEAD_SEC = 45 * 60L

@@ -122,6 +122,12 @@ abstract class Strings {
     abstract val findingRoutes: String
     abstract val noRoutes: String
     abstract val tryAgain: String
+    /** Where a past trip planning started, when it was from where the user was. */
+    abstract val whereYouWere: String
+    /** Over options kept from an earlier search: "Options shown at 14:05". */
+    abstract fun pastOptions(time: String): String
+    abstract val searchNow: String
+    abstract val fromMyLocation: String
     abstract val earlier: String
     abstract val best: String
     abstract val fastest: String

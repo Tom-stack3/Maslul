@@ -1,12 +1,28 @@
+@file:UseSerializers(InstantSerializer::class)
+
 package com.maslul.app.data
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.UseSerializers
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import java.time.Instant
 import java.time.ZoneId
 import com.maslul.app.i18n.S
 
 val IsraelZone: ZoneId = ZoneId.of("Asia/Jerusalem")
 
+/** Stores an [Instant] as epoch milliseconds (for options kept with a [PastSearch]). */
+object InstantSerializer : KSerializer<Instant> {
+    override val descriptor = PrimitiveSerialDescriptor("Instant", PrimitiveKind.LONG)
+    override fun serialize(encoder: Encoder, value: Instant) = encoder.encodeLong(value.toEpochMilli())
+    override fun deserialize(decoder: Decoder): Instant = Instant.ofEpochMilli(decoder.decodeLong())
+}
+
+@Serializable
 data class GeoPoint(val lat: Double, val lon: Double)
 
 enum class TransitMode {
@@ -68,6 +84,7 @@ data class Place(
         else "${name.trim()}|${"%.4f".format(lat)}|${"%.4f".format(lon)}"
 }
 
+@Serializable
 data class StopCall(
     val stopId: String?,
     val name: String,
@@ -87,8 +104,10 @@ data class StopCall(
     val scheduledTime: Instant? get() = scheduledDeparture ?: scheduledArrival
 }
 
+@Serializable
 data class WalkStep(val instruction: String, val distanceM: Double)
 
+@Serializable
 data class Leg(
     val mode: TransitMode,
     val from: StopCall,
@@ -134,6 +153,7 @@ data class Leg(
     val lineRef: String? get() = TripIds.lineRef(routeId)
 }
 
+@Serializable
 data class Itinerary(
     val id: String,
     val start: Instant,
@@ -217,6 +237,7 @@ data class Ride(val journeyRef: String, val departure: Instant, val tripId: Stri
     val tripNumber get() = journeyRef.substringBefore('_')
 }
 
+@Serializable
 data class Vehicle(
     val lineRef: String,
     val journeyRef: String?,

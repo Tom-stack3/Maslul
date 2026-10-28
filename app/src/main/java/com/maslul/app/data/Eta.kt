@@ -1,5 +1,10 @@
+@file:UseSerializers(InstantSerializer::class)
+
 package com.maslul.app.data
 
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
+import kotlinx.serialization.UseSerializers
 import java.time.Instant
 
 /**
@@ -158,6 +163,7 @@ enum class LiveStatus {
     PASSED,
 }
 
+@Serializable
 data class LiveCall(
     val status: LiveStatus,
     val scheduled: Instant,
@@ -166,7 +172,8 @@ data class LiveCall(
     val stopsAway: Int? = null,
     val vehicle: Vehicle? = null,
     val alightExpected: Instant? = null,
-    val progress: TripTimeline.Progress? = null,
+    /** Not kept with a [PastSearch]: only a trip's own screen follows it along the line. */
+    @Transient val progress: TripTimeline.Progress? = null,
 ) {
     val best: Instant get() = expected ?: scheduled
 }

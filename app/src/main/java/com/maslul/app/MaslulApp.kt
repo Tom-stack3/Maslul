@@ -2,6 +2,7 @@ package com.maslul.app
 
 import android.app.Application
 import com.maslul.app.data.LocationRepo
+import com.maslul.app.data.SearchHistory
 import com.maslul.app.data.TransitRepository
 import com.maslul.app.data.UserStore
 import com.maslul.app.data.languageOrDefault
@@ -19,6 +20,8 @@ class MaslulApp : Application() {
         private set
     lateinit var location: LocationRepo
         private set
+    lateinit var searches: SearchHistory
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -27,6 +30,7 @@ class MaslulApp : Application() {
         repo = TransitRepository()
         store = UserStore(this)
         location = LocationRepo(this)
+        searches = SearchHistory(this)
         applyLanguage()
         // Picking another language (or mode) switches the words everywhere, notifications included.
         MainScope().launch {

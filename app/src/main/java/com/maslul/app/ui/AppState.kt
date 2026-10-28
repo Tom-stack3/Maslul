@@ -26,6 +26,7 @@ abstract class ScreenModel(val nav: AppNav) {
     val repo get() = app.repo
     val store get() = app.store
     val location get() = app.location
+    val searches get() = app.searches
     open fun dispose() = scope.cancel()
 }
 

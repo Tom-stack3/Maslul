@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.rounded.DirectionsWalk
 import androidx.compose.material.icons.automirrored.rounded.Accessible
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.DirectionsCar
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
@@ -113,6 +114,7 @@ import com.maslul.app.data.RideOffer
 import com.maslul.app.data.RidePlanner
 import com.maslul.app.data.ShuttleSchedule
 import com.maslul.app.data.OnBoardStart
+import com.maslul.app.data.PastSearch
 import com.maslul.app.data.Ranking
 import com.maslul.app.data.Settings
 import com.maslul.app.data.SavedTrip
@@ -156,7 +158,7 @@ enum class TimeMode { NOW, DEPART, ARRIVE }
 /** Why a search came back empty, for screens that word [RoutesModel.error] their own way. */
 enum class RouteError { LOCATION, NO_ROUTES, NETWORK }
 
-class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
+class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null) : ScreenModel(nav) {
     var from by mutableStateOf(from)
     var to by mutableStateOf(to)
     var timeMode by mutableStateOf(TimeMode.NOW)
@@ -207,7 +209,45 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
     /** The trip the user is on, when planning from a bus or train they're riding. */
     val onBoardTripId: String? get() = from.takeIf { it.kind == PlaceKind.ON_BOARD }?.tripId
 
-    init { search() }
+    /** Options kept from an earlier search, showing as they were then; null once searched again. */
+    var past by mutableStateOf(past)
+        private set
+
+    /** The spot a kept search from where the user was started at: searching from it again is still "from where I was". */
+    private var keptHere: String? = null
+
+    init { if (past != null) showPast(past) else search() }
+
+    private fun showPast(p: PastSearch) {
+        timeMode = if (p.arriveBy) TimeMode.ARRIVE else TimeMode.DEPART
+        time = (p.time ?: p.at).atZone(IsraelZone)
+        raw = p.itineraries
+        itineraries = p.itineraries
+        walkOnly = p.walkOnly
+        rideLive.putAll(p.live)
+        after.putAll(p.after)
+        p.itineraries.forEach { itin -> itin.firstTransit?.let { p.live[it.rideKey] }?.let { live[itin.id] = it } }
+        searchedAt = p.at
+        keptHere = from.key.takeIf { p.fromHere }
+        searchedFrom = from.key
+        searchedTo = to.key
+        fromPoint = from.point
+        toPoint = to.point
+    }
+
+    /** Keeps the options showing, so the destination's recent can show them again. */
+    private fun keep() {
+        if (past != null || ride != null || onBoardTripId != null) return
+        if (to.kind == PlaceKind.CURRENT_LOCATION || to.kind == PlaceKind.ON_BOARD) return
+        if (itineraries.isEmpty() && walkOnly == null) return
+        val start = fromPoint ?: return
+        // "Where I am" changes: keep the spot it was.
+        val rides = itineraries.flatMap { it.transitLegs }.flatMap { it.options }.map { it.rideKey }.toSet()
+        val f = if (from.kind == PlaceKind.CURRENT_LOCATION) Place(S.whereYouWere, start.lat, start.lon, kind = PlaceKind.PIN) else from
+        searches.save(PastSearch(f, to, Instant.now(), time?.toInstant()?.takeIf { timeMode != TimeMode.NOW },
+            timeMode == TimeMode.ARRIVE, from.kind == PlaceKind.CURRENT_LOCATION || from.key == keptHere, itineraries, walkOnly,
+            rideLive.filterKeys { it in rides }, after.filterKeys { it in rides }))
+    }
 
     private val walkMps get() = store.data.value.settings.walkSpeed.mps
     private val rail get() = store.data.value.settings.railPreference
@@ -312,6 +352,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
         val keptLive = keep.mapNotNull { it.firstTransit?.rideKey }.associateWith { rideLive[it] }
         searchedFrom = from.key
         searchedTo = to.key
+        past = null
         // A newer search replaces one still running (a lift's or on-board search can take a while).
         searchJob?.cancel()
         refining = false
@@ -370,6 +411,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             // Nothing at all within the usual walk: look further before saying so.
             if (errorKind == RouteError.NO_ROUTES) widenWalk()
             loading = false
+            keep()
             shuttleOptions?.await()?.takeIf { it.isNotEmpty() }?.let { extra ->
                 val ids = raw.map { it.id }.toSet()
                 raw = raw + extra.filter { it.id !in ids }
@@ -381,6 +423,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             findAlternatives()
             refreshLive()
             findRidesAfter()
+            keep()
         }
     }
 
@@ -472,10 +515,13 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
             findAlternatives()
             refreshLive()
             findRidesAfter()
+            keep()
         }
     }
 
     suspend fun refreshLive() {
+        // Kept options show as they were.
+        if (past != null) return
         val now = Instant.now()
         coroutineScope {
             // Every bus of every ride (other lines, later ones, an earlier one running late),
@@ -506,7 +552,20 @@ class RoutesModel(nav: AppNav, from: Place, to: Place) : ScreenModel(nav) {
         while (true) {
             delay(25_000)
             refreshLive()
+            // What's showing now is what the recent should show again.
+            if (!loading) keep()
         }
+    }
+
+    override fun dispose() {
+        if (!loading) keep()
+        super.dispose()
+    }
+
+    /** Plans the trip again from where the user is now, instead of where a kept search started. */
+    fun searchFromHere() {
+        from = CurrentLocation
+        refreshNow()
     }
 
     /** Re-runs the search from now (the screen may have sat open for a while). */
@@ -609,9 +668,11 @@ fun RoutesScreen(model: RoutesModel) {
     var showRide by remember { mutableStateOf(false) }
     /** The options as they were when the sheet opened (null while it's closed). */
     var optionsBefore by remember { mutableStateOf<Settings?>(null) }
-    var now by remember { mutableStateOf(Instant.now()) }
+    var clock by remember { mutableStateOf(Instant.now()) }
     LaunchedEffect(Unit) { model.liveLoop() }
-    LaunchedEffect(Unit) { while (true) { delay(15_000); now = Instant.now() } }
+    LaunchedEffect(Unit) { while (true) { delay(15_000); clock = Instant.now() } }
+    // Kept options read as they did when they were found: the buses then, not the ones still to come.
+    val now = model.past?.at ?: clock
     // Coming back to a "leave now" search after a while re-runs it.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
@@ -627,7 +688,8 @@ fun RoutesScreen(model: RoutesModel) {
 
     val expectedOf = { itin: Itinerary -> Combine.expected(itin, model.onBoardTripId) { model.rideLive[it.rideKey] } }
     // Leaving now: options whose connection a late bus has made impossible aren't options (unless nothing else is left).
-    val itineraries = if (model.timeMode != TimeMode.NOW) model.itineraries
+    val leavingNow = model.timeMode == TimeMode.NOW || model.past?.let { it.time == null } == true
+    val itineraries = if (!leavingNow) model.itineraries
         else model.itineraries.filter { Combine.connects(it, now) { l -> model.rideLive[l.rideKey] } }.ifEmpty { model.itineraries }
     val fastest = itineraries.minByOrNull { expectedOf(it).durationSec }?.id
     val leastWalk = itineraries.takeIf { it.size > 2 }?.minByOrNull { it.walkSec }?.id
@@ -713,6 +775,9 @@ fun RoutesScreen(model: RoutesModel) {
                 if (model.canPage) item {
                     TextButton(onClick = { model.more(false) }, enabled = !model.loadingMore,
                         modifier = Modifier.padding(start = 8.dp)) { Text(S.earlier) }
+                }
+                model.past?.let { p ->
+                    item(key = "past") { PastNote(p.at, clock, onSearchNow = model::refreshNow, onFromHere = model::searchFromHere) }
                 }
                 if (model.widerWalk.isNotEmpty()) item(key = "wider") {
                     WiderWalkNote(data.settings.maxWalkMinutes)
@@ -1003,6 +1068,28 @@ private fun WiderWalkNote(maxWalkMinutes: Int) {
         Spacer(Modifier.width(10.dp))
         Text(S.widerWalkNote(maxWalkMinutes, WiderWalk.MINUTES), style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSecondaryContainer)
+    }
+}
+
+/** Over options kept from an earlier search: when they were found, and ways to look again. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PastNote(at: Instant, now: Instant, onSearchNow: () -> Unit, onFromHere: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp).clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.secondaryContainer).padding(start = 14.dp, end = 6.dp, top = 10.dp)
+            .testTag("past_note"),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.History, null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(S.pastOptions(Fmt.dayTime(at, now)), style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer)
+        }
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onFromHere, modifier = Modifier.testTag("past_from_here")) { Text(S.fromMyLocation) }
+            TextButton(onClick = onSearchNow, modifier = Modifier.testTag("past_search_now")) { Text(S.searchNow) }
+        }
     }
 }
 

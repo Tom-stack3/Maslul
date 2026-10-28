@@ -134,6 +134,7 @@ internal object Russian : Strings() {
     override val tryAgain = "Попробовать снова"
     override val whereYouWere = "Где вы были"
     override fun pastOptions(time: String) = "Варианты на $time"
+    override fun searchedAt(time: String) = "Поиск в $time"
     override val searchNow = "Искать сейчас"
     override val fromMyLocation = "От моего местоположения"
     override val earlier = "Раньше"

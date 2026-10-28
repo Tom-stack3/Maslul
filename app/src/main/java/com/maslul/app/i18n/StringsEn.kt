@@ -125,6 +125,7 @@ internal object English : Strings() {
     override val tryAgain = "Try again"
     override val whereYouWere = "Where you were"
     override fun pastOptions(time: String) = "Options shown at $time"
+    override fun searchedAt(time: String) = "Searched at $time"
     override val searchNow = "Search now"
     override val fromMyLocation = "From my location"
     override val earlier = "Earlier"

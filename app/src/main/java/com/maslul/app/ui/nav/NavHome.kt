@@ -137,7 +137,7 @@ class NavHomeModel(nav: AppNav) : ScreenModel(nav) {
     fun openRecent(to: Place) {
         val past = searches.forPlace(to) ?: return planTo(to)
         store.addRecent(to)
-        nav.push(RoutesModel(nav, past.from, past.to, past))
+        nav.push(RoutesModel(nav, past.shownFrom, past.to, past))
     }
 
     fun removeRecent(p: Place) {
@@ -392,7 +392,9 @@ private fun HomePlaces(model: NavHomeModel, data: UserData) {
         PlaceRow(
             title = p.name,
             // Kept options say where from and when, which is what tapping shows.
-            subtitle = kept?.let { k -> S.fromPlace(k.from.shownName) + " · " + Fmt.dayTime(k.at) } ?: p.subtitle,
+            subtitle = kept?.let { k ->
+                if (k.fromHere) S.searchedAt(Fmt.dayTime(k.at)) else S.fromPlace(k.from.shownName) + " · " + Fmt.dayTime(k.at)
+            } ?: p.subtitle,
             icon = Icons.Rounded.History,
             trailing = {
                 IconButton(onClick = { model.removeRecent(p) }, modifier = Modifier.size(32.dp)) {

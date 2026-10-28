@@ -4,11 +4,14 @@ import com.maslul.app.data.AppJson
 import com.maslul.app.data.GeoPoint
 import com.maslul.app.data.Itinerary
 import com.maslul.app.data.Leg
+import com.maslul.app.data.LiveCall
+import com.maslul.app.data.LiveStatus
 import com.maslul.app.data.PastSearch
 import com.maslul.app.data.Place
 import com.maslul.app.data.PlaceKind
 import com.maslul.app.data.StopCall
 import com.maslul.app.data.TransitMode
+import com.maslul.app.data.Vehicle
 import com.maslul.app.data.WalkStep
 import com.maslul.app.data.with
 import kotlinx.serialization.encodeToString
@@ -37,6 +40,8 @@ class PastSearchTest {
                 emptyList(), emptyList(), steps = listOf(WalkStep("Turn left", 120.0))),
             bus(line, 10).copy(alternatives = listOf(bus("92", 14))),
         ))),
+        live = mapOf("trip-16" to LiveCall(LiveStatus.LIVE, at(10), at(13), delaySec = 180, stopsAway = 4,
+            vehicle = Vehicle("route-16", "j1", at(0), 32.01, 34.8, 90f, 30, at(4), 1200.0, "21", "v7"))),
     )
 
     @Test
@@ -47,6 +52,8 @@ class PastSearchTest {
         // The bus that had already left by now is still there, with the other line that was offered.
         assertEquals(listOf("16", "92"), back.itineraries.single().transitLegs.single().options.map { it.lineLabel })
         assertEquals(at(10), back.itineraries.single().legs.last().start)
+        // And the bus running late, as the times shown followed it.
+        assertEquals(at(13), back.live.getValue("trip-16").expected)
     }
 
     @Test

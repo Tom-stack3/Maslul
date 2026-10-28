@@ -213,6 +213,9 @@ class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null)
     var past by mutableStateOf(past)
         private set
 
+    /** The spot a kept search from where the user was started at: searching from it again is still "from where I was". */
+    private var keptHere: String? = null
+
     init { if (past != null) showPast(past) else search() }
 
     private fun showPast(p: PastSearch) {
@@ -221,7 +224,11 @@ class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null)
         raw = p.itineraries
         itineraries = p.itineraries
         walkOnly = p.walkOnly
+        rideLive.putAll(p.live)
+        after.putAll(p.after)
+        p.itineraries.forEach { itin -> itin.firstTransit?.let { p.live[it.rideKey] }?.let { live[itin.id] = it } }
         searchedAt = p.at
+        keptHere = from.key.takeIf { p.fromHere }
         searchedFrom = from.key
         searchedTo = to.key
         fromPoint = from.point
@@ -235,9 +242,11 @@ class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null)
         if (itineraries.isEmpty() && walkOnly == null) return
         val start = fromPoint ?: return
         // "Where I am" changes: keep the spot it was.
+        val rides = itineraries.flatMap { it.transitLegs }.flatMap { it.options }.map { it.rideKey }.toSet()
         val f = if (from.kind == PlaceKind.CURRENT_LOCATION) Place(S.whereYouWere, start.lat, start.lon, kind = PlaceKind.PIN) else from
-        searches.save(PastSearch(f, to, searchedAt, time?.toInstant()?.takeIf { timeMode != TimeMode.NOW },
-            timeMode == TimeMode.ARRIVE, itineraries, walkOnly))
+        searches.save(PastSearch(f, to, Instant.now(), time?.toInstant()?.takeIf { timeMode != TimeMode.NOW },
+            timeMode == TimeMode.ARRIVE, from.kind == PlaceKind.CURRENT_LOCATION || from.key == keptHere, itineraries, walkOnly,
+            rideLive.filterKeys { it in rides }, after.filterKeys { it in rides }))
     }
 
     private val walkMps get() = store.data.value.settings.walkSpeed.mps
@@ -543,7 +552,14 @@ class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null)
         while (true) {
             delay(25_000)
             refreshLive()
+            // What's showing now is what the recent should show again.
+            if (!loading) keep()
         }
+    }
+
+    override fun dispose() {
+        if (!loading) keep()
+        super.dispose()
     }
 
     /** Plans the trip again from where the user is now, instead of where a kept search started. */
@@ -672,7 +688,8 @@ fun RoutesScreen(model: RoutesModel) {
 
     val expectedOf = { itin: Itinerary -> Combine.expected(itin, model.onBoardTripId) { model.rideLive[it.rideKey] } }
     // Leaving now: options whose connection a late bus has made impossible aren't options (unless nothing else is left).
-    val itineraries = if (model.timeMode != TimeMode.NOW) model.itineraries
+    val leavingNow = model.timeMode == TimeMode.NOW || model.past?.let { it.time == null } == true
+    val itineraries = if (!leavingNow) model.itineraries
         else model.itineraries.filter { Combine.connects(it, now) { l -> model.rideLive[l.rideKey] } }.ifEmpty { model.itineraries }
     val fastest = itineraries.minByOrNull { expectedOf(it).durationSec }?.id
     val leastWalk = itineraries.takeIf { it.size > 2 }?.minByOrNull { it.walkSec }?.id

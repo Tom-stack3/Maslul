@@ -126,6 +126,8 @@ abstract class Strings {
     abstract val whereYouWere: String
     /** Over options kept from an earlier search: "Options shown at 14:05". */
     abstract fun pastOptions(time: String): String
+    /** A recent's kept options, planned from where the user was: "Searched at 14:05". */
+    abstract fun searchedAt(time: String): String
     abstract val searchNow: String
     abstract val fromMyLocation: String
     abstract val earlier: String

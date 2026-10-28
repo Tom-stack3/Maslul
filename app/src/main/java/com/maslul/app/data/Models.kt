@@ -237,6 +237,7 @@ data class Ride(val journeyRef: String, val departure: Instant, val tripId: Stri
     val tripNumber get() = journeyRef.substringBefore('_')
 }
 
+@Serializable
 data class Vehicle(
     val lineRef: String,
     val journeyRef: String?,

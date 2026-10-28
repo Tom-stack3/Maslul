@@ -133,6 +133,7 @@ internal object Hebrew : Strings() {
     override val tryAgain = "ניסיון נוסף"
     override val whereYouWere = "המקום שבו היית"
     override fun pastOptions(time: String) = "האפשרויות שהוצגו ב־$time"
+    override fun searchedAt(time: String) = "חיפוש ב־$time"
     override val searchNow = "חיפוש עכשיו"
     override val fromMyLocation = "מהמיקום שלי"
     override val earlier = "מוקדם יותר"

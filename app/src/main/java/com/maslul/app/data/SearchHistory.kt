@@ -3,6 +3,7 @@
 package com.maslul.app.data
 
 import android.content.Context
+import com.maslul.app.i18n.S
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,15 +28,23 @@ data class PastSearch(
     /** Where the trip was planned from; "where I am" is kept as the spot it was then. */
     val from: Place,
     val to: Place,
-    /** When the options were found. */
+    /** When the options were showing (last looked at). */
     val at: Instant,
     /** The time asked for, or null for leaving right then. */
     val time: Instant? = null,
     val arriveBy: Boolean = false,
+    /** Planned from where the user was then (kept in [from] as that spot). */
+    val fromHere: Boolean = false,
     val itineraries: List<Itinerary>,
     val walkOnly: Itinerary? = null,
+    /** How the rides were running then, by [Leg.rideKey]: what the times shown followed. */
+    val live: Map<String, LiveCall> = emptyMap(),
+    /** The rides after a tight connection, by the [Leg.rideKey] of the one to catch: the wait if it's missed. */
+    val after: Map<String, List<Leg>> = emptyMap(),
 ) {
     val key get() = to.key
+    /** Where it started, named in the current language. */
+    val shownFrom get() = if (fromHere) from.copy(name = S.whereYouWere) else from
 }
 
 /** The latest [PastSearch] per destination, newest first, at most [max]. */

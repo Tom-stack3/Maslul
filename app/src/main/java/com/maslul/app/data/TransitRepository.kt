@@ -90,7 +90,18 @@ class TransitRepository(
 
     // ---- Routing --------------------------------------------------------------------
 
-    suspend fun plan(req: TransitousApi.PlanRequest): PlanResult = transitous.plan(req.copy(language = language))
+    suspend fun plan(req: TransitousApi.PlanRequest): PlanResult {
+        val drives = listOfNotNull(req.preTransitModes, req.directModes).any { "CAR" in it }
+        if (!drives) return transitous.plan(req.copy(language = language))
+        // Transitous drives on empty roads: ask for as far as the driver gets in traffic, then time it so.
+        val at = req.time ?: Instant.now()
+        val asked = req.copy(
+            language = language,
+            maxPreTransitMinutes = req.maxPreTransitMinutes?.let { Traffic.freeFlowMinutes(it, at) },
+            maxDirectMinutes = req.maxDirectMinutes?.let { Traffic.freeFlowMinutes(it, at) },
+        )
+        return Traffic.plan(transitous.plan(asked), req)
+    }
 
     /**
      * Direct rides (any line) between [leg]'s boarding and alighting stops around its time,
@@ -157,21 +168,23 @@ class TransitRepository(
 
     // ---- Rides, shuttles and being on board --------------------------------------------
 
-    /** Driving route from [from] to [to] (a single car leg with its geometry), leaving at [at]. */
+    /** Driving route from [from] to [to] (a single car leg with its geometry), leaving at [at], timed for its traffic. */
     suspend fun carRoute(from: GeoPoint, to: GeoPoint, at: Instant? = null): Leg? {
         val key = "%.4f,%.4f>%.4f,%.4f".format(from.lat, from.lon, to.lat, to.lon)
-        synchronized(carCache) { carCache[key] }?.let { c ->
-            // Same road; only the times move.
+        // Kept as on empty roads: the same road at another time has other traffic.
+        val free = synchronized(carCache) { carCache[key] }?.let { c ->
             val shift = at?.let { it.epochSecond - c.start.epochSecond } ?: 0
-            return c.copy(start = c.start.plusSeconds(shift), end = c.end.plusSeconds(shift))
+            c.copy(start = c.start.plusSeconds(shift), end = c.end.plusSeconds(shift))
+        } ?: run {
+            val req = TransitousApi.PlanRequest(
+                from = from, to = to, time = at, directModes = "CAR", maxDirectMinutes = 6 * 60, directOnly = true, numItineraries = 1,
+                language = language,
+            )
+            val car = transitous.plan(req).carOnly?.legs?.firstOrNull { it.mode == TransitMode.CAR } ?: return null
+            synchronized(carCache) { carCache[key] = car }
+            car
         }
-        val req = TransitousApi.PlanRequest(
-            from = from, to = to, time = at, directModes = "CAR", maxDirectMinutes = 6 * 60, directOnly = true, numItineraries = 1,
-            language = language,
-        )
-        val car = transitous.plan(req).carOnly?.legs?.firstOrNull { it.mode == TransitMode.CAR } ?: return null
-        synchronized(carCache) { carCache[key] = car }
-        return car
+        return Traffic.drive(free)
     }
 
     /**

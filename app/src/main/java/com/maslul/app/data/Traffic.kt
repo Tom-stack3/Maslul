@@ -18,10 +18,11 @@ import java.time.Instant
 object Traffic {
     /**
      * A drive at its time: longer in traffic. Leaving at its start, or with [keepEnd] getting there
-     * at its end (an arrival time, or the bus a lift is driving to).
+     * at its end (an arrival time, or the bus a lift is driving to). [known]: how long it takes, when
+     * live traffic says (see [GoogleRoutesApi]).
      */
-    fun drive(car: Leg, keepEnd: Boolean = false): Leg {
-        val sec = drivingSec(car, if (keepEnd) car.end else car.start, backwards = keepEnd)
+    fun drive(car: Leg, keepEnd: Boolean = false, known: Long? = null): Leg {
+        val sec = known ?: drivingSec(car, if (keepEnd) car.end else car.start, backwards = keepEnd)
         return if (keepEnd) {
             val start = car.end.minusSeconds(sec)
             car.copy(start = start, from = car.from.copy(scheduledDeparture = car.from.scheduledDeparture?.let { start }))
@@ -34,14 +35,17 @@ object Traffic {
     /**
      * [result] of planning [req] with its car legs in traffic: a lift to a bus leaves that much
      * earlier, and is dropped when that's before [req]'s time ([now] when leaving now); driving all
-     * the way gets there later (or, arriving by a time, leaves earlier).
+     * the way gets there later (or, arriving by a time, leaves earlier). [known]: a drive's seconds,
+     * when live traffic says.
      */
-    fun plan(result: PlanResult, req: TransitousApi.PlanRequest, now: Instant = Instant.now()): PlanResult {
+    fun plan(
+        result: PlanResult, req: TransitousApi.PlanRequest, now: Instant = Instant.now(), known: (Leg) -> Long? = { null },
+    ): PlanResult {
         val leave = (req.time ?: now).minusSeconds(60)
         val lifts = result.itineraries.mapNotNull { itin ->
             val i = itin.legs.indexOfFirst { it.mode == TransitMode.CAR }
             if (i < 0) return@mapNotNull itin
-            val car = drive(itin.legs[i], keepEnd = true)
+            val car = drive(itin.legs[i], keepEnd = true, known(itin.legs[i]))
             // Anything before the drive (a walk to the car) moves back with it.
             val back = car.start.epochSecond - itin.legs[i].start.epochSecond
             val legs = itin.legs.mapIndexed { j, l -> if (j < i) l.shifted(back) else if (j == i) car else l }
@@ -50,7 +54,7 @@ object Traffic {
         }
         val car = result.carOnly?.let { itin ->
             val i = itin.legs.indexOfFirst { it.mode == TransitMode.CAR }
-            val drive = drive(itin.legs[i], keepEnd = req.arriveBy)
+            val drive = drive(itin.legs[i], keepEnd = req.arriveBy, known(itin.legs[i]))
             // The legs after the drive (arriving by a time: before it) keep their length and move along.
             val by = if (req.arriveBy) drive.start.epochSecond - itin.legs[i].start.epochSecond
                 else drive.end.epochSecond - itin.legs[i].end.epochSecond

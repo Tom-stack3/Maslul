@@ -50,5 +50,5 @@ Live directions (**Start**) work as usual from here: Maslul tells you when your 
 ## Good to know
 
 - Rides and on-board plans try several places to get out, so they take a few seconds longer than a normal search. The first options show as soon as they're found, and a thin bar at the top shows more are on the way.
-- Driving times allow for the usual traffic at that hour and day: a 20-minute drive at night can take 30–35 at weekday rush hour (40 or more into Tel Aviv), and a "10 min ride" then reaches less far. Maslul knows the rush hours, not today's jams or accidents.
+- Driving times allow for the usual traffic at that hour and day: a 20-minute drive at night can take 30–35 at weekday rush hour (40 or more into Tel Aviv), and a "10 min ride" then reaches less far. Maslul knows the rush hours, not today's jams or accidents. For live traffic, add your own Google Maps Platform key under **Settings → Advanced → Live traffic (Google Maps)**.
 - Shuttles are kept on your phone only, like the rest of your places and settings.

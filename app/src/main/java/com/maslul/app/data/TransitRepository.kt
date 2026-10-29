@@ -64,6 +64,9 @@ class TransitRepository(
 
     var language: String? = null
 
+    /** Live traffic for driving times, with the user's own Google key; else the usual rush hours ([Traffic]). */
+    @Volatile var google: GoogleRoutesApi? = null
+
     // ---- Places ---------------------------------------------------------------------
 
     suspend fun searchPlaces(text: String, near: GeoPoint?): List<Place> = coroutineScope {
@@ -100,7 +103,22 @@ class TransitRepository(
             maxPreTransitMinutes = req.maxPreTransitMinutes?.let { Traffic.freeFlowMinutes(it, at, req.from) },
             maxDirectMinutes = req.maxDirectMinutes?.let { Traffic.freeFlowMinutes(it, at, req.from) },
         )
-        return Traffic.plan(transitous.plan(asked), req)
+        val result = transitous.plan(asked)
+        val cars = (result.itineraries + listOfNotNull(result.carOnly)).mapNotNull { itin -> itin.legs.firstOrNull { it.mode == TransitMode.CAR } }
+        val live = liveDriving(cars)
+        return Traffic.plan(result, req, known = { live[it] })
+    }
+
+    /** How long [drives] take in live traffic, by Google (one request for those starting at the same place); empty without a key. */
+    private suspend fun liveDriving(drives: List<Leg>): Map<Leg, Long> {
+        val g = google ?: return emptyMap()
+        if (drives.isEmpty()) return emptyMap()
+        return runCatching {
+            drives.groupBy { it.from.point }.flatMap { (from, legs) ->
+                legs.zip(g.drivingSec(from, legs.map { it.to.point }, legs.minOf { it.start }))
+                    .mapNotNull { (l, sec) -> sec?.let { l to it } }
+            }.toMap()
+        }.getOrDefault(emptyMap())
     }
 
     /**
@@ -184,7 +202,7 @@ class TransitRepository(
             synchronized(carCache) { carCache[key] = car }
             car
         }
-        return Traffic.drive(free)
+        return Traffic.drive(free, known = liveDriving(listOf(free))[free])
     }
 
     /**

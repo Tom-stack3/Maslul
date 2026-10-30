@@ -62,9 +62,9 @@ class TrafficTest {
     @Test
     fun aLiftToABusLeavesEarlierAndIsDroppedWhenThatsTooEarly() {
         val asked = il("2026-10-27T08:00")
-        // One lift leaves right away, one a quarter of an hour later; both catch their bus.
+        // One lift leaves right away, one half an hour later; both catch their bus.
         val tight = itin("tight", leg(TransitMode.CAR, asked, 20, km = 15.0), leg(TransitMode.BUS, asked.plusSeconds(20 * 60L), 30))
-        val loose = itin("loose", leg(TransitMode.CAR, asked.plusSeconds(15 * 60L), 20, km = 15.0), leg(TransitMode.BUS, asked.plusSeconds(35 * 60L), 30))
+        val loose = itin("loose", leg(TransitMode.CAR, asked.plusSeconds(30 * 60L), 20, km = 15.0), leg(TransitMode.BUS, asked.plusSeconds(50 * 60L), 30))
         val out = Traffic.plan(PlanResult(listOf(tight, loose), null, null, null), req(asked)).itineraries
         assertEquals(listOf("loose"), out.map { it.id })
         val lift = out.single()
@@ -88,6 +88,24 @@ class TrafficTest {
         val arriving = Traffic.plan(PlanResult(emptyList(), null, null, null, car), req(car.end, arriveBy = true)).carOnly!!
         assertEquals(car.end, arriving.end)
         assertTrue(arriving.start.isBefore(t))
+    }
+
+    @Test
+    fun weekdayPeaksAreAsSlowAsGoogleMapsTypicallySays() {
+        // Netanya to Hadera on Route 2, and Ra'anana to Azrieli: typically 1.6× and 2.5× the night's at 08:00.
+        val netanya = GeoPoint(32.32, 34.85)
+        val hadera = GeoPoint(32.43, 34.92)
+        val raanana = GeoPoint(32.18, 34.87)
+        val azrieli = GeoPoint(32.07, 34.79)
+        assertEquals(1.6, Traffic.factor(il("2026-10-27T08:00"), highway, netanya, hadera), 0.15)
+        assertEquals(2.2, Traffic.factor(il("2026-10-27T08:00"), highway, raanana, azrieli), 0.3)
+        // Passing through Tel Aviv counts too; Friday and Saturday stay as the buses measured, outside it.
+        val rishon = GeoPoint(31.96, 34.80)
+        assertTrue(Traffic.factor(il("2026-10-27T17:00"), highway, raanana, rishon) > 2.0)
+        assertEquals(Traffic.factor(il("2026-10-30T11:00"), highway), Traffic.factor(il("2026-10-30T11:00"), highway, netanya, hadera), 0.001)
+        assertTrue(Traffic.factor(il("2026-10-30T11:00"), highway, raanana, azrieli) > Traffic.factor(il("2026-10-30T11:00"), highway) + 0.1)
+        // Empty roads are empty everywhere.
+        assertEquals(1.0, Traffic.factor(il("2026-10-27T03:00"), highway, raanana, azrieli), 0.05)
     }
 
     @Test

@@ -10,6 +10,10 @@ import java.time.Instant
  * Measured from Open Bus (Stride) actual bus ride times, 5–28 October 2026, on 45 intercity lines
  * (mostly highway) and 45 city lines: each ride's duration over its line's uncongested one (its
  * 10th percentile), the median per weekday and hour. tools/traffic measures it again.
+ *
+ * Buses understate a car's jam (bus lanes, and stops that take as long in any traffic), so the
+ * traffic part is stretched: on weekdays, and more again for drives into or across the Tel Aviv
+ * area. Fitted to Google Maps' typical driving times on a dozen drives (see [WEEKDAY_STRETCH]).
  */
 object Traffic {
     /**
@@ -17,7 +21,7 @@ object Traffic {
      * at its end (an arrival time, or the bus a lift is driving to).
      */
     fun drive(car: Leg, keepEnd: Boolean = false): Leg {
-        val sec = drivingSec(car.durationSec, car.distanceM, if (keepEnd) car.end else car.start, backwards = keepEnd)
+        val sec = drivingSec(car, if (keepEnd) car.end else car.start, backwards = keepEnd)
         return if (keepEnd) {
             val start = car.end.minusSeconds(sec)
             car.copy(start = start, from = car.from.copy(scheduledDeparture = car.from.scheduledDeparture?.let { start }))
@@ -56,31 +60,59 @@ object Traffic {
         return result.copy(itineraries = lifts, carOnly = car)
     }
 
-    /** Empty-road driving minutes that take about [minutes] at [at]: how far a driver offering [minutes] can take you. */
-    fun freeFlowMinutes(minutes: Int, at: Instant): Int =
-        maxOf(1, Math.round(minutes / factor(at, TYPICAL_LIFT_MPS)).toInt())
+    /**
+     * Empty-road driving minutes that take about [minutes] at [at]: how far a driver offering [minutes]
+     * can take you, starting [from].
+     */
+    fun freeFlowMinutes(minutes: Int, at: Instant, from: GeoPoint? = null): Int =
+        maxOf(1, Math.round(minutes / factor(at, TYPICAL_LIFT_MPS, from)).toInt())
 
-    /** How much longer than on empty roads a drive that averages [freeFlowMps] there takes, leaving at [at]. */
-    fun factor(at: Instant, freeFlowMps: Double): Double {
+    /**
+     * How much longer than on empty roads a drive that averages [freeFlowMps] there takes, leaving
+     * at [at], from [from] to [to] (when known: the Tel Aviv area is slower).
+     */
+    fun factor(at: Instant, freeFlowMps: Double, from: GeoPoint? = null, to: GeoPoint? = null): Double {
         val local = at.atZone(IsraelZone)
         // Sunday = 0 ... Saturday = 6; hours measured at their middle, so in between they blend.
         val pos = (local.dayOfWeek.value % 7) * 24 + local.hour + local.minute / 60.0 - 0.5
         val i = Math.floorMod(Math.floor(pos).toInt(), WEEK)
         val f = pos - Math.floor(pos)
-        fun at(table: Array<DoubleArray>, k: Int) = table[k / 24][k % 24]
+        val area = if (from != null && nearTelAviv(from, to ?: from)) TEL_AVIV_STRETCH else 1.0
+        // The traffic part, stretched for cars; per hour, so it blends smoothly into the weekend too.
+        fun at(table: Array<DoubleArray>, k: Int): Double {
+            val day = k / 24
+            val stretch = (if (day <= 4) WEEKDAY_STRETCH else 1.0) * area
+            return 1 + (table[day][k % 24] - 1) * stretch
+        }
         fun blend(table: Array<DoubleArray>) = at(table, i) * (1 - f) + at(table, (i + 1) % WEEK) * f
         // Fast roads are mostly highway, slow ones streets in town.
         val highway = ((freeFlowMps * 3.6 - CITY_KMH) / (HIGHWAY_KMH - CITY_KMH)).coerceIn(0.0, 1.0)
         return blend(INTERCITY) * highway + blend(CITY) * (1 - highway)
     }
 
-    /** Driving [freeSec] (over [distanceM]) starting, or with [backwards] ending, at [at]: timed by the traffic when it leaves. */
-    private fun drivingSec(freeSec: Long, distanceM: Double?, at: Instant, backwards: Boolean): Long {
+    /** Driving [car] starting, or with [backwards] ending, at [at]: timed by the traffic when it leaves. */
+    private fun drivingSec(car: Leg, at: Instant, backwards: Boolean): Long {
+        val freeSec = car.durationSec
         if (freeSec <= 0) return freeSec
-        val mps = (distanceM ?: 0.0) / freeSec
+        val mps = (car.distanceM ?: 0.0) / freeSec
+        fun factor(t: Instant) = factor(t, mps, car.from.point, car.to.point)
         // Getting there by a time: leaving about this much earlier.
-        val leave = if (backwards) at.minusSeconds(Math.round(freeSec * factor(at.minusSeconds(freeSec), mps))) else at
-        return Math.round(freeSec * factor(leave, mps))
+        val leave = if (backwards) at.minusSeconds(Math.round(freeSec * factor(at.minusSeconds(freeSec)))) else at
+        return Math.round(freeSec * factor(leave))
+    }
+
+    /** Whether a drive from [a] to [b] starts, ends or (as the crow flies) passes in the Tel Aviv area. */
+    private fun nearTelAviv(a: GeoPoint, b: GeoPoint): Boolean {
+        // Flat enough at this scale: metres east and north of the centre.
+        val kx = 111_320 * Math.cos(Math.toRadians(TEL_AVIV.lat))
+        fun xy(p: GeoPoint) = (p.lon - TEL_AVIV.lon) * kx to (p.lat - TEL_AVIV.lat) * 110_570.0
+        val (ax, ay) = xy(a)
+        val (bx, by) = xy(b)
+        val dx = bx - ax
+        val dy = by - ay
+        val len2 = dx * dx + dy * dy
+        val t = if (len2 == 0.0) 0.0 else (-(ax * dx + ay * dy) / len2).coerceIn(0.0, 1.0)
+        return Math.hypot(ax + t * dx, ay + t * dy) <= TEL_AVIV_RADIUS_M
     }
 
     private fun Leg.shifted(sec: Long) = copy(start = start.plusSeconds(sec), end = end.plusSeconds(sec))
@@ -90,6 +122,19 @@ object Traffic {
     private const val HIGHWAY_KMH = 70.0
     /** A lift is a bit of both; for sizing how far it reaches before its route is known. */
     private const val TYPICAL_LIFT_MPS = 50 / 3.6
+
+    /**
+     * Sunday to Thursday, a car's traffic delay over the buses': Google Maps' typical times on
+     * weekdays (Haifa, Jerusalem, Netanya–Hadera, Ashdod–Rehovot, Modiin–Jerusalem, Kfar Saba–Petah
+     * Tikva) are 1.5–1.9× the night's at the peaks, where buses measure 1.3–1.4×. Friday and
+     * Saturday matched as measured.
+     */
+    private const val WEEKDAY_STRETCH = 2.0
+    /** And around Tel Aviv, any day: drives into it from Ra'anana, Petah Tikva or Rishon take 2.1–2.5× at the peaks. */
+    private const val TEL_AVIV_STRETCH = 1.75
+    /** Tel Aviv, Ramat Gan, Givatayim, Bnei Brak, Holon and Bat Yam. */
+    private val TEL_AVIV = GeoPoint(32.07, 34.79)
+    private const val TEL_AVIV_RADIUS_M = 8_000.0
 
     // Per weekday (Sunday first) and hour of the day, by when the ride leaves. Where buses don't run
     // (late at night, Shabbat) or run only in a few towns (Shabbat daytime), filled in: see tools/traffic.

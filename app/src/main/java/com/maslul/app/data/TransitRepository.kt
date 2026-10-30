@@ -97,8 +97,8 @@ class TransitRepository(
         val at = req.time ?: Instant.now()
         val asked = req.copy(
             language = language,
-            maxPreTransitMinutes = req.maxPreTransitMinutes?.let { Traffic.freeFlowMinutes(it, at) },
-            maxDirectMinutes = req.maxDirectMinutes?.let { Traffic.freeFlowMinutes(it, at) },
+            maxPreTransitMinutes = req.maxPreTransitMinutes?.let { Traffic.freeFlowMinutes(it, at, req.from) },
+            maxDirectMinutes = req.maxDirectMinutes?.let { Traffic.freeFlowMinutes(it, at, req.from) },
         )
         return Traffic.plan(transitous.plan(asked), req)
     }

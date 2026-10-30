@@ -269,6 +269,12 @@ abstract class Strings {
     abstract val onBoardSettingHint: String
     abstract val myShuttles: String
     abstract val myShuttlesHint: String
+    abstract val liveTraffic: String
+    abstract val liveTrafficOn: String
+    abstract val liveTrafficOff: String
+    abstract val liveTrafficHint: String
+    abstract val googleKey: String
+    abstract val howToGetKey: String
     abstract fun nShuttles(n: Int): String
     abstract val about: String
     abstract val appName: String

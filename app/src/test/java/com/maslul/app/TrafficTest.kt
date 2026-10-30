@@ -109,6 +109,15 @@ class TrafficTest {
     }
 
     @Test
+    fun liveTrafficTimesWinOverTheUsualRushHours() {
+        val t = il("2026-10-27T08:00")
+        val car = leg(TransitMode.CAR, t, 40, km = 50.0)
+        assertEquals(55 * 60L, Traffic.drive(car, known = 55 * 60L).durationSec)
+        val out = Traffic.plan(PlanResult(emptyList(), null, null, null, itin("car", car)), req(t), known = { 3000L }).carOnly!!
+        assertEquals(t.plusSeconds(3000), out.end)
+    }
+
+    @Test
     fun aLiftOfferedInRushHourReachesLessFar() {
         assertTrue(Traffic.freeFlowMinutes(20, il("2026-10-27T08:00")) < 20)
         assertTrue(Traffic.freeFlowMinutes(20, il("2026-10-27T03:00")) in 18..21)

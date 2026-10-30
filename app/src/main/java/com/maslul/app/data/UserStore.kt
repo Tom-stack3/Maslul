@@ -51,6 +51,8 @@ data class Settings(
     /** The app's language (the full app's and Simple Maslul's); null follows the phone's. */
     @SerialName("simpleLanguage")
     val language: AppLanguage? = null,
+    /** The user's own Google Maps Platform key, for driving times in live traffic; null uses the usual rush hours. */
+    val googleMapsKey: String? = null,
 )
 
 /** Languages Maslul speaks. */

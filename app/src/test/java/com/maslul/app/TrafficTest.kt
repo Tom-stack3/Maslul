@@ -109,6 +109,19 @@ class TrafficTest {
     }
 
     @Test
+    fun countryRoadsBarelyJam() {
+        // Kiryat Shmona to Rosh Pina, and Mitzpe Gvulot to Beer Sheva: typically 1.15–1.25× the night's at the peaks.
+        val kiryatShmona = GeoPoint(33.21, 35.57)
+        val roshPina = GeoPoint(32.97, 35.54)
+        val gvulot = GeoPoint(31.21, 34.46)
+        val beerSheva = GeoPoint(31.24, 34.80)
+        assertEquals(1.18, Traffic.factor(il("2026-10-27T08:00"), highway, kiryatShmona, roshPina), 0.08)
+        assertEquals(1.2, Traffic.factor(il("2026-10-27T17:00"), highway, gvulot, beerSheva), 0.08)
+        // A lift offered out there still reaches most of the way.
+        assertTrue(Traffic.freeFlowMinutes(30, il("2026-10-27T08:00"), gvulot) >= 24)
+    }
+
+    @Test
     fun aLiftOfferedInRushHourReachesLessFar() {
         assertTrue(Traffic.freeFlowMinutes(20, il("2026-10-27T08:00")) < 20)
         assertTrue(Traffic.freeFlowMinutes(20, il("2026-10-27T03:00")) in 18..21)

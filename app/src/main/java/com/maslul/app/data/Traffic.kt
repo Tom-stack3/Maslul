@@ -12,8 +12,9 @@ import java.time.Instant
  * 10th percentile), the median per weekday and hour. tools/traffic measures it again.
  *
  * Buses understate a car's jam (bus lanes, and stops that take as long in any traffic), so the
- * traffic part is stretched: on weekdays, and more again for drives into or across the Tel Aviv
- * area. Fitted to Google Maps' typical driving times on a dozen drives (see [WEEKDAY_STRETCH]).
+ * traffic part is stretched in the cities: on weekdays, and more again for drives into or across
+ * the Tel Aviv area. Out in the country it's eased instead, as roads there barely jam. Fitted to
+ * Google Maps' typical driving times on 14 drives (see [WEEKDAY_STRETCH], [COUNTRY_STRETCH]).
  */
 object Traffic {
     /**
@@ -69,7 +70,7 @@ object Traffic {
 
     /**
      * How much longer than on empty roads a drive that averages [freeFlowMps] there takes, leaving
-     * at [at], from [from] to [to] (when known: the Tel Aviv area is slower).
+     * at [at], from [from] to [to] (when known: the Tel Aviv area is slower, the country quicker).
      */
     fun factor(at: Instant, freeFlowMps: Double, from: GeoPoint? = null, to: GeoPoint? = null): Double {
         val local = at.atZone(IsraelZone)
@@ -77,11 +78,17 @@ object Traffic {
         val pos = (local.dayOfWeek.value % 7) * 24 + local.hour + local.minute / 60.0 - 0.5
         val i = Math.floorMod(Math.floor(pos).toInt(), WEEK)
         val f = pos - Math.floor(pos)
-        val area = if (from != null && nearTelAviv(from, to ?: from)) TEL_AVIV_STRETCH else 1.0
+        val area = when {
+            from == null -> 1.0
+            passesNear(from, to ?: from, TEL_AVIV, TEL_AVIV_RADIUS_M) -> TEL_AVIV_STRETCH
+            CITIES.any { (centre, radius) -> passesNear(from, to ?: from, centre, radius) } -> 1.0
+            else -> COUNTRY_STRETCH
+        }
+        val weekday = if (area == COUNTRY_STRETCH) 1.0 else WEEKDAY_STRETCH
         // The traffic part, stretched for cars; per hour, so it blends smoothly into the weekend too.
         fun at(table: Array<DoubleArray>, k: Int): Double {
             val day = k / 24
-            val stretch = (if (day <= 4) WEEKDAY_STRETCH else 1.0) * area
+            val stretch = (if (day <= 4) weekday else 1.0) * area
             return 1 + (table[day][k % 24] - 1) * stretch
         }
         fun blend(table: Array<DoubleArray>) = at(table, i) * (1 - f) + at(table, (i + 1) % WEEK) * f
@@ -101,18 +108,18 @@ object Traffic {
         return Math.round(freeSec * factor(leave))
     }
 
-    /** Whether a drive from [a] to [b] starts, ends or (as the crow flies) passes in the Tel Aviv area. */
-    private fun nearTelAviv(a: GeoPoint, b: GeoPoint): Boolean {
+    /** Whether a drive from [a] to [b] starts, ends or (as the crow flies) passes within [radiusM] of [centre]. */
+    private fun passesNear(a: GeoPoint, b: GeoPoint, centre: GeoPoint, radiusM: Double): Boolean {
         // Flat enough at this scale: metres east and north of the centre.
-        val kx = 111_320 * Math.cos(Math.toRadians(TEL_AVIV.lat))
-        fun xy(p: GeoPoint) = (p.lon - TEL_AVIV.lon) * kx to (p.lat - TEL_AVIV.lat) * 110_570.0
+        val kx = 111_320 * Math.cos(Math.toRadians(centre.lat))
+        fun xy(p: GeoPoint) = (p.lon - centre.lon) * kx to (p.lat - centre.lat) * 110_570.0
         val (ax, ay) = xy(a)
         val (bx, by) = xy(b)
         val dx = bx - ax
         val dy = by - ay
         val len2 = dx * dx + dy * dy
         val t = if (len2 == 0.0) 0.0 else (-(ax * dx + ay * dy) / len2).coerceIn(0.0, 1.0)
-        return Math.hypot(ax + t * dx, ay + t * dy) <= TEL_AVIV_RADIUS_M
+        return Math.hypot(ax + t * dx, ay + t * dy) <= radiusM
     }
 
     private fun Leg.shifted(sec: Long) = copy(start = start.plusSeconds(sec), end = end.plusSeconds(sec))
@@ -135,6 +142,16 @@ object Traffic {
     /** Tel Aviv, Ramat Gan, Givatayim, Bnei Brak, Holon and Bat Yam. */
     private val TEL_AVIV = GeoPoint(32.07, 34.79)
     private const val TEL_AVIV_RADIUS_M = 8_000.0
+    /**
+     * Where the weekday stretch holds: the coastal plain from Hadera to Ashdod (Modiin and the Sharon
+     * included), Haifa and the Krayot, and Jerusalem.
+     */
+    private val CITIES = listOf(GeoPoint(32.08, 34.83) to 40_000.0, GeoPoint(32.79, 35.02) to 15_000.0, GeoPoint(31.78, 35.20) to 15_000.0)
+    /**
+     * Elsewhere, any day: Mitzpe Gvulot–Beer Sheva and Kiryat Shmona–Rosh Pina take 1.15–1.25× the
+     * night's at the peaks, less than the (mostly central) buses measure.
+     */
+    private const val COUNTRY_STRETCH = 0.6
 
     // Per weekday (Sunday first) and hour of the day, by when the ride leaves. Where buses don't run
     // (late at night, Shabbat) or run only in a few towns (Shabbat daytime), filled in: see tools/traffic.

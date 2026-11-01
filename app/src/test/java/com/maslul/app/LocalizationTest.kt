@@ -57,6 +57,7 @@ class LocalizationTest {
             com.maslul.app.data.ThemeMode::class.java to com.maslul.app.data.ThemeMode.DARK,
             DayOfWeek::class.java to DayOfWeek.FRIDAY, LocalDate::class.java to LocalDate.of(2026, 10, 9),
             List::class.java to listOf("a", "b"),
+            com.maslul.app.data.GoogleRoutesApi.Problem::class.java to com.maslul.app.data.GoogleRoutesApi.Problem.BILLING,
         )
         val methods = Strings::class.java.declaredMethods.filter { java.lang.reflect.Modifier.isAbstract(it.modifiers) }
         assertTrue(methods.size > 300)

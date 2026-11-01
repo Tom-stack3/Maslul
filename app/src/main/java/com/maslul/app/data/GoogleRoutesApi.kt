@@ -4,6 +4,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import java.io.IOException
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -42,7 +49,7 @@ class GoogleRoutesApi(
             .build()
         val text = Http.execute(request).use { r ->
             withContext(Dispatchers.IO) {
-                if (!r.isSuccessful) throw HttpException(r.code, "HTTP ${r.code} from Google Routes")
+                if (!r.isSuccessful) throw GoogleKeyException(problemOf(r.code, r.body?.string().orEmpty()), r.code)
                 r.body!!.string()
             }
         }
@@ -52,6 +59,14 @@ class GoogleRoutesApi(
         }
         return out.toList()
     }
+
+    /** Whether the key works: one short drive in Tel Aviv. Throws [GoogleKeyException] when Google refuses it. */
+    suspend fun check() {
+        drivingSec(GeoPoint(32.0853, 34.7818), listOf(GeoPoint(32.0744, 34.7920)), Instant.now())
+    }
+
+    /** Why Google refuses a key. */
+    enum class Problem { BILLING, API_DISABLED, INVALID_KEY, RESTRICTED, QUOTA, OTHER }
 
     @Serializable
     private data class MatrixRequest(
@@ -83,7 +98,32 @@ class GoogleRoutesApi(
         val condition: String? = null,
     )
 
-    private companion object {
-        val JSON = "application/json".toMediaType()
+    companion object {
+        private val JSON = "application/json".toMediaType()
+
+        /** What a refusal with HTTP [code] and [body] (Google's error, in a list or not) means. */
+        fun problemOf(code: Int, body: String): Problem {
+            val error = runCatching {
+                when (val root = AppJson.parseToJsonElement(body)) {
+                    is JsonArray -> root.firstOrNull()?.jsonObject
+                    else -> root.jsonObject
+                }?.get("error")?.jsonObject
+            }.getOrNull()
+            fun JsonElement.str(name: String) = (this as? JsonObject)?.get(name)?.jsonPrimitive?.contentOrNull
+            val status = error?.str("status")
+            val reasons = (error?.get("details") as? JsonArray).orEmpty().mapNotNull { it.str("reason") }
+            return when {
+                "BILLING_DISABLED" in reasons -> Problem.BILLING
+                reasons.any { it == "SERVICE_DISABLED" || it == "ACCESS_NOT_CONFIGURED" } -> Problem.API_DISABLED
+                "API_KEY_INVALID" in reasons -> Problem.INVALID_KEY
+                reasons.any { it.startsWith("API_KEY_") && it.endsWith("_BLOCKED") } -> Problem.RESTRICTED
+                code == 429 || status == "RESOURCE_EXHAUSTED" -> Problem.QUOTA
+                code == 400 && error?.str("message").orEmpty().contains("API key not valid") -> Problem.INVALID_KEY
+                else -> Problem.OTHER
+            }
+        }
     }
 }
+
+/** Google refused the request: the key needs fixing ([problem]), as opposed to a network hiccup. */
+class GoogleKeyException(val problem: GoogleRoutesApi.Problem, val code: Int) : IOException("Google Routes refused the key: $problem (HTTP $code)")

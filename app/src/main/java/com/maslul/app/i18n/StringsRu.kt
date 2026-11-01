@@ -1,5 +1,6 @@
 package com.maslul.app.i18n
 
+import com.maslul.app.data.GoogleRoutesApi
 import com.maslul.app.data.RailPreference
 import com.maslul.app.data.ThemeMode
 import com.maslul.app.data.TransitMode
@@ -335,6 +336,16 @@ internal object Russian : Strings() {
     override val liveTrafficHint = "С вашим ключом Google Maps Platform поездки на машине считаются по пробкам Google в реальном времени. Google даёт бесплатный месячный лимит, сверх него списывает оплату с вашего аккаунта Google. Ключ хранится только на этом телефоне."
     override val googleKey = "Ключ API"
     override val howToGetKey = "Как получить ключ"
+    override val liveTrafficChecking = "Проверяем ключ в Google…"
+    override val liveTrafficRefused = "Не работает: время в пути с учётом обычных часов пик"
+    override fun googleProblem(problem: GoogleRoutesApi.Problem) = when (problem) {
+        GoogleRoutesApi.Problem.BILLING -> "Google не ответит, пока в проекте Google Cloud этого ключа не включена оплата (Billing). Бесплатный месячный лимит при этом сохраняется."
+        GoogleRoutesApi.Problem.API_DISABLED -> "В проекте Google Cloud этого ключа не включён Routes API."
+        GoogleRoutesApi.Problem.INVALID_KEY -> "Google не узнаёт этот ключ. Проверьте, что он скопирован целиком."
+        GoogleRoutesApi.Problem.RESTRICTED -> "Ключ ограничен и не разрешает Маслул или Routes API. Разрешите и то и другое в настройках ключа."
+        GoogleRoutesApi.Problem.QUOTA -> "Ключ пока исчерпал свой лимит."
+        GoogleRoutesApi.Problem.OTHER -> "Google отклонил ключ."
+    }
     override fun nShuttles(n: Int) = "$n ${ruPlural(n.toLong(), "шаттл", "шаттла", "шаттлов")}"
     override val about = "О приложении"
     override val appName = "Маслул"

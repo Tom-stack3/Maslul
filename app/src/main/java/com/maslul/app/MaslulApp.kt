@@ -11,6 +11,7 @@ import com.maslul.app.data.UserStore
 import com.maslul.app.data.languageOrDefault
 import com.maslul.app.i18n.L10n
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -41,8 +42,10 @@ class MaslulApp : Application() {
             store.data.map { it.settings.language to it.settings.simpleMode }.distinctUntilChanged().collect { applyLanguage() }
         }
         MainScope().launch {
-            store.data.map { it.settings.googleMapsKey?.trim()?.takeIf(String::isNotEmpty) }.distinctUntilChanged().collect { key ->
+            store.data.map { it.settings.googleMapsKey?.trim()?.takeIf(String::isNotEmpty) }.distinctUntilChanged().collectLatest { key ->
                 repo.google = key?.let { GoogleRoutesApi(it, packageName to signingCertSha1()) }
+                // Find out now whether Google takes it, rather than at the first ride.
+                repo.checkGoogle()
             }
         }
     }

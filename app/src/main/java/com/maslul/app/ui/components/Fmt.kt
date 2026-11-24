@@ -46,6 +46,13 @@ object Fmt {
 
     fun distance(m: Double): String = if (m < 1000) S.meters((m / 10).toInt() * 10) else S.km("%.1f".format(Locale.US, m / 1000))
 
+    /** "14:05" today, "Oct 27 · 14:05" on another day. */
+    fun dayTime(t: Instant, now: Instant = Instant.now()): String {
+        val day = t.atZone(IsraelZone).toLocalDate()
+        val today = now.atZone(IsraelZone).toLocalDate()
+        return if (day == today) time(t) else "${day(day, today)} · ${time(t)}"
+    }
+
     fun day(date: LocalDate, today: LocalDate = LocalDate.now(IsraelZone)): String = when (date) {
         today -> S.today
         today.plusDays(1) -> S.tomorrow

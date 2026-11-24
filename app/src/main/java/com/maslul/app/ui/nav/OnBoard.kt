@@ -75,6 +75,7 @@ class OnBoardModel(nav: AppNav, private val onPicked: (Place) -> Unit) : ScreenM
     var error by mutableStateOf<String?>(null)
     var candidates by mutableStateOf<List<BoardCandidate>>(emptyList())
     var query by mutableStateOf("")
+        private set
     var mode by mutableStateOf<TransitMode?>(null)
     /** The candidate whose timetable is being looked up after a tap. */
     var picking by mutableStateOf<String?>(null)
@@ -85,6 +86,12 @@ class OnBoardModel(nav: AppNav, private val onPicked: (Place) -> Unit) : ScreenM
     /** Trips of live vehicles not on the timetable around you, by [BoardCandidate.key]; null when it has none. */
     private val resolved = HashMap<String, String?>()
     private var resolving: Job? = null
+    /** The line number typed, and its live vehicles anywhere (null while looking): your own may be reported far behind. */
+    var line by mutableStateOf<String?>(null)
+        private set
+    var lineResults by mutableStateOf<List<BoardCandidate>?>(null)
+        private set
+    private var lineSearch: Job? = null
 
     init { refresh() }
 
@@ -104,6 +111,28 @@ class OnBoardModel(nav: AppNav, private val onPicked: (Place) -> Unit) : ScreenM
                 .onSuccess { candidates = tidy(it); resolveLoose() }
                 .onFailure { if (candidates.isEmpty()) error = S.errOnBoardNetwork }
             loading = false
+            if (line != null) searchLine(quiet = true)
+        }
+    }
+
+    fun onQuery(q: String) {
+        query = q
+        val n = q.trim().takeIf(OnBoard::isLineNumber)
+        if (n == line) return
+        line = n
+        lineResults = null
+        searchLine()
+    }
+
+    /** Live vehicles of the line typed, wherever they are, after a pause in typing. */
+    private fun searchLine(quiet: Boolean = false) {
+        lineSearch?.cancel()
+        val n = line ?: return
+        lineSearch = scope.launch {
+            if (!quiet) delay(400)
+            val p = here ?: location.last.value ?: return@launch
+            val found = runCatching { repo.boardLine(p, n) }.getOrNull()
+            if (found != null || lineResults == null) lineResults = found.orEmpty()
         }
     }
 
@@ -157,6 +186,13 @@ class OnBoardModel(nav: AppNav, private val onPicked: (Place) -> Unit) : ScreenM
                 .filter { q.isEmpty() || it.lineLabel.contains(q, ignoreCase = true) || it.headsign.contains(q, ignoreCase = true) }
         }
 
+    /** The typed line's live vehicles not already listed around you; null while still looking. */
+    val elsewhere: List<BoardCandidate>?
+        get() {
+            val near = candidates.mapNotNull { c -> c.vehicle?.let { c.lineRef to it.journeyRef } }.toSet()
+            return lineResults?.filter { (it.lineRef to it.vehicle?.journeyRef) !in near }?.let { OnBoard.rank(it, Instant.now(), heading) }
+        }
+
     fun pick(c: BoardCandidate) {
         if (picking != null) return
         scope.launch {
@@ -198,7 +234,7 @@ fun OnBoardScreen(model: OnBoardModel) {
                     }
                     IconButton(onClick = { model.refresh() }, enabled = !model.loading) { Icon(Icons.Rounded.Refresh, S.refresh) }
                 }
-                SearchBox(model.query, { model.query = it }, S.lineOrDestination, Modifier.testTag("onboard_filter"))
+                SearchBox(model.query, model::onQuery, S.lineOrDestination, Modifier.testTag("onboard_filter"))
                 if (model.modes.size > 1) {
                     Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
@@ -217,11 +253,12 @@ fun OnBoardScreen(model: OnBoardModel) {
             }
         }
         val shown = model.shown
+        val line = model.line
         when {
             model.loading -> LoadingBox(text = S.lookingForRides)
-            model.candidates.isEmpty() && model.error != null ->
+            model.candidates.isEmpty() && line == null && model.error != null ->
                 MessageBox(S.cantTellRide, body = model.error, action = S.tryAgain, onAction = { model.refresh() })
-            model.candidates.isEmpty() -> MessageBox(
+            model.candidates.isEmpty() && line == null -> MessageBox(
                 S.noRidesAround,
                 body = S.noRidesAroundHint,
                 icon = Icons.Rounded.DirectionsBus, action = S.refresh, onAction = { model.refresh() },
@@ -230,12 +267,37 @@ fun OnBoardScreen(model: OnBoardModel) {
                 model.error?.let { e ->
                     item { Text(e, style = MaterialTheme.typography.bodySmall, color = x.late, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
                 }
-                if (shown.isEmpty()) item {
+                if (shown.isEmpty() && line == null) item {
                     Text(S.nothingMatchesRides, style = MaterialTheme.typography.bodyMedium,
                         color = x.subtle, modifier = Modifier.padding(20.dp))
                 }
                 items(shown, key = { it.key }) { c ->
                     CandidateRow(c, now, model.picking == c.key, OnBoard.against(c, model.heading)) { model.pick(c) }
+                }
+                if (line != null) {
+                    val elsewhere = model.elsewhere
+                    item(key = "line_header") {
+                        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 4.dp).testTag("onboard_line")) {
+                            Text(S.lineAnywhere(line), style = MaterialTheme.typography.titleSmall)
+                            Text(S.lineAnywhereHint, style = MaterialTheme.typography.bodySmall, color = x.subtle)
+                        }
+                    }
+                    when {
+                        elsewhere == null -> item(key = "line_loading") {
+                            Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(12.dp))
+                                Text(S.lookingForLine(line), style = MaterialTheme.typography.bodyMedium, color = x.subtle)
+                            }
+                        }
+                        elsewhere.isEmpty() && shown.none { it.lineLabel == line } -> item(key = "line_none") {
+                            Text(S.noLiveOfLine(line), style = MaterialTheme.typography.bodyMedium, color = x.subtle,
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+                        }
+                        else -> items(elsewhere, key = { "line:" + it.key }) { c ->
+                            CandidateRow(c, now, model.picking == c.key, OnBoard.against(c, model.heading)) { model.pick(c) }
+                        }
+                    }
                 }
                 item {
                     Text(

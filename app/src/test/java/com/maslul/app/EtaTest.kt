@@ -100,7 +100,7 @@ class EtaTest {
         val v = vehicle(1.5, t)
         val live = LiveCalls.compute(timeline, origin, 3, 4, v, t)
         assertEquals(LiveStatus.LIVE, live.status)
-        // Our estimates run early for a bus this close: a minute is added (see [LiveCalls.estimateCorrected]).
+        // Our estimates run early for a bus this close: a minute and a quarter is added (see [LiveCalls.estimateCorrected]).
         near(origin.plusSeconds(420 + LiveCalls.ESTIMATE_EARLY_SEC), live.expected)
         near(origin.plusSeconds(540 + LiveCalls.ESTIMATE_EARLY_SEC), live.alightExpected)
         assertEquals(2, live.stopsAway)

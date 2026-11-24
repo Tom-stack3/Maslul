@@ -2,6 +2,7 @@ package com.maslul.app
 
 import com.maslul.app.data.Departure
 import com.maslul.app.data.GeoPoint
+import com.maslul.app.data.LineRoute
 import com.maslul.app.data.Motion
 import com.maslul.app.data.OnBoard
 import com.maslul.app.data.StopCall
@@ -215,5 +216,41 @@ class OnBoardTest {
         assertNull(Motion.heading(listOf(fix(0.0, 20), fix(2.0, 30)), 32_000))
         // Nor is drifting slower than walking pace.
         assertNull(Motion.heading(listOf(fix(0.0, 0), fix(0.1, 110)), 115_000))
+    }
+
+    @Test
+    fun aBusOnTheHighwayReachesFurther() {
+        // 90 s old at 100 km/h: 2.5 km behind the bus you're on, beyond what town traffic would cover.
+        val highway = vehicle(2.4, ageSec = 90).copy(velocityKmh = 100)
+        assertEquals(listOf("100"), OnBoard.nearVehicles(p(0.0), mapOf("100" to listOf(highway)), now).map { it.lineRef })
+        assertTrue(OnBoard.nearVehicles(p(0.0), mapOf("100" to listOf(highway.copy(velocityKmh = 30))), now).isEmpty())
+        // However old, not more than a few kilometres.
+        assertTrue(OnBoard.reach(highway.copy(recordedAt = now.minusSeconds(600)), now) < 5000)
+    }
+
+    @Test
+    fun lineNumbersAreFoundAnywhere() {
+        assertTrue(OnBoard.isLineNumber("125"))
+        assertTrue(OnBoard.isLineNumber("1א"))
+        assertFalse(OnBoard.isLineNumber("Haifa"))
+        assertFalse(OnBoard.isLineNumber("א"))
+        assertFalse(OnBoard.isLineNumber(""))
+    }
+
+    private fun route(lineRef: Long, label: String = "125") = LineRoute(
+        lineRef * 10, lineRef, 3, label, "Origin-City<->Destination-City-1#", "1", "1", "#", "Agency", TransitMode.BUS, "2026-10-05",
+    )
+
+    @Test
+    fun aLinesVehiclesWhereverTheyAreNearestFirst() {
+        val byLine = mapOf(
+            "1" to listOf(vehicle(30.0, "1", "a"), vehicle(8.0, "1", "b")),
+            "2" to listOf(vehicle(50.0, "2", "c")),
+            "3" to listOf(vehicle(0.1, "3", "d")),
+        )
+        val out = OnBoard.ofLine(p(0.0), listOf(route(1), route(1), route(2)), byLine)
+        assertEquals(listOf("b", "a", "c"), out.map { it.vehicle!!.journeyRef })
+        assertTrue(out.all { it.tripId == null && it.lineLabel == "125" && it.live })
+        assertEquals(8000.0, out.first().distanceM, 50.0)
     }
 }

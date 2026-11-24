@@ -112,10 +112,11 @@ class PastSearchFlowTest {
             assertTrue(!exists("refining"))
             val shown = spans()
             assertTrue("kept options shown: $shown", shown.isNotEmpty())
-            // Searching again now drops the note.
+            // Searched from where you were, so searching again starts from where you are now: no second button.
+            assertTrue(!exists("past_from_here"))
             rule.onNodeWithTag("past_search_now").performClick()
             rule.waitUntil(5_000) { !exists("past_note") }
-            // Searched again from the same spot, it's still kept as from where you were.
+            rule.onNodeWithText("Current location").assertExists()
             rule.waitUntil(60_000) { app.searches.searches.value.first().at.isAfter(kept.at) }
             assertTrue(app.searches.searches.value.first().fromHere)
         } finally {

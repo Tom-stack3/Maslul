@@ -213,9 +213,6 @@ class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null)
     var past by mutableStateOf(past)
         private set
 
-    /** The spot a kept search from where the user was started at: searching from it again is still "from where I was". */
-    private var keptHere: String? = null
-
     init { if (past != null) showPast(past) else search() }
 
     private fun showPast(p: PastSearch) {
@@ -228,7 +225,6 @@ class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null)
         after.putAll(p.after)
         p.itineraries.forEach { itin -> itin.firstTransit?.let { p.live[it.rideKey] }?.let { live[itin.id] = it } }
         searchedAt = p.at
-        keptHere = from.key.takeIf { p.fromHere }
         searchedFrom = from.key
         searchedTo = to.key
         fromPoint = from.point
@@ -245,7 +241,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null)
         val rides = itineraries.flatMap { it.transitLegs }.flatMap { it.options }.map { it.rideKey }.toSet()
         val f = if (from.kind == PlaceKind.CURRENT_LOCATION) Place(S.whereYouWere, start.lat, start.lon, kind = PlaceKind.PIN) else from
         searches.save(PastSearch(f, to, Instant.now(), time?.toInstant()?.takeIf { timeMode != TimeMode.NOW },
-            timeMode == TimeMode.ARRIVE, from.kind == PlaceKind.CURRENT_LOCATION || from.key == keptHere, itineraries, walkOnly,
+            timeMode == TimeMode.ARRIVE, from.kind == PlaceKind.CURRENT_LOCATION, itineraries, walkOnly,
             rideLive.filterKeys { it in rides }, after.filterKeys { it in rides }))
     }
 
@@ -562,7 +558,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null)
         super.dispose()
     }
 
-    /** Plans the trip again from where the user is now, instead of where a kept search started. */
+    /** Plans the trip again from where the user is now: a kept search from where they were starts there again. */
     fun searchFromHere() {
         from = CurrentLocation
         refreshNow()
@@ -777,7 +773,8 @@ fun RoutesScreen(model: RoutesModel) {
                         modifier = Modifier.padding(start = 8.dp)) { Text(S.earlier) }
                 }
                 model.past?.let { p ->
-                    item(key = "past") { PastNote(p.at, clock, onSearchNow = model::refreshNow, onFromHere = model::searchFromHere) }
+                    item(key = "past") { PastNote(p.at, clock, onSearchNow = if (p.fromHere) model::searchFromHere else model::refreshNow,
+                        onFromHere = model::searchFromHere.takeIf { !p.fromHere }) }
                 }
                 if (model.widerWalk.isNotEmpty()) item(key = "wider") {
                     WiderWalkNote(data.settings.maxWalkMinutes)
@@ -1071,10 +1068,10 @@ private fun WiderWalkNote(maxWalkMinutes: Int) {
     }
 }
 
-/** Over options kept from an earlier search: when they were found, and ways to look again. */
+/** Over options kept from an earlier search: when they were found, and ways to look again (from where you are, if it started elsewhere). */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PastNote(at: Instant, now: Instant, onSearchNow: () -> Unit, onFromHere: () -> Unit) {
+private fun PastNote(at: Instant, now: Instant, onSearchNow: () -> Unit, onFromHere: (() -> Unit)?) {
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp).clip(RoundedCornerShape(14.dp))
             .background(MaterialTheme.colorScheme.secondaryContainer).padding(start = 14.dp, end = 6.dp, top = 10.dp)
@@ -1087,7 +1084,7 @@ private fun PastNote(at: Instant, now: Instant, onSearchNow: () -> Unit, onFromH
                 color = MaterialTheme.colorScheme.onSecondaryContainer)
         }
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = onFromHere, modifier = Modifier.testTag("past_from_here")) { Text(S.fromMyLocation) }
+            onFromHere?.let { TextButton(onClick = it, modifier = Modifier.testTag("past_from_here")) { Text(S.fromMyLocation) } }
             TextButton(onClick = onSearchNow, modifier = Modifier.testTag("past_search_now")) { Text(S.searchNow) }
         }
     }

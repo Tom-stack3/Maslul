@@ -60,9 +60,10 @@ class RideShuttleSmokeTest {
         // From Mitzpe Gvulot, the site's track isn't drivable: "car, walk across, car again" isn't a lift.
         val site = GeoPoint(31.2051214, 34.4554327)
         val beerSheva = GeoPoint(31.242886, 34.798546)
+        // The nearest bus is half an hour's drive on empty roads: more in traffic.
         val r = repo.plan(TransitousApi.PlanRequest(site, beerSheva, preTransitModes = RideOffer.WITHIN_MODES,
-            maxPreTransitMinutes = 30, directModes = "WALK,CAR", maxDirectMinutes = 30, maxWalkMinutes = 30))
-        r.itineraries.take(3).forEach { println("Gvulot within 30: ${describe(it)}") }
+            maxPreTransitMinutes = 40, directModes = "WALK,CAR", maxDirectMinutes = 40, maxWalkMinutes = 30))
+        r.itineraries.take(3).forEach { println("Gvulot within 40: ${describe(it)}") }
         assertTrue(r.itineraries.isNotEmpty())
         assertTrue(r.itineraries.all { it.legs.count { l -> l.mode == TransitMode.CAR } == 1 && it.legs.first().mode == TransitMode.CAR })
     }

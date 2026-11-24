@@ -200,6 +200,32 @@ class CombineTest {
         assertEquals(listOf("trip-16-12"), Combine.catchableOptions(itin, 1, at(4)) { live[it.rideKey] }.map { it.tripId })
     }
 
+    /**
+     * A line every few minutes; you're at the stop by min 12 for the planned one at 15. Earlier
+     * runs are kept as late candidates: the 05 has passed, the 07 came at 8 (gone, even hurrying),
+     * the 10 is due now (you'd have to run), and the 12 is late and comes at 14.
+     */
+    @Test
+    fun mapShowsOnlyRidesYouCanStillCatch() {
+        val planned = direct("1", 15, 30)
+        val earlier = listOf(5, 7, 10, 12).map { bus("1", "A", 0.2, "B", 5.0, it, it + 15) }
+        val itin = Combine.addAlternatives(planned, 1, earlier, now = at(9))
+        val (r5, r7, r10, r12) = earlier
+        val live = mapOf(
+            r5.rideKey to LiveCall(LiveStatus.PASSED, r5.start, null),
+            r7.rideKey to liveAt(r7, 8),
+            r10.rideKey to liveAt(r10, 10),
+            r12.rideKey to liveAt(r12, 14),
+            planned.legs[1].rideKey to liveAt(planned.legs[1], 15),
+        )
+        // All of them are candidates on the leg...
+        assertEquals(listOf(5, 7, 10, 12, 15).map { "trip-1-$it" }, itin.legs[1].options.map { it.tripId })
+        // ...but only the ones still to come are drawn, the chosen one last (on top).
+        assertEquals(listOf("trip-1-10", "trip-1-12", "trip-1-15"), Combine.shownOnMap(itin, 1, at(9)) { live[it.rideKey] }.map { it.tripId })
+        // Walks have no ride on the map.
+        assertTrue(Combine.shownOnMap(itin, 0, at(9)) { live[it.rideKey] }.isEmpty())
+    }
+
     @Test
     fun keepsUpToThreeBusesPerLine() {
         val planned = direct("16", 12, 30)

@@ -249,6 +249,16 @@ object Combine {
     }
 
     /**
+     * Leg [legIndex]'s rides whose vehicles go on the map: the ones [catchableOptions] offers
+     * (hurrying included), not earlier ones already gone by, with the chosen ride last so it's
+     * drawn on top.
+     */
+    fun shownOnMap(itin: Itinerary, legIndex: Int, now: Instant, liveOf: (Leg) -> LiveCall?): List<Leg> {
+        val leg = itin.legs.getOrNull(legIndex)?.takeIf { it.mode.isTransit } ?: return emptyList()
+        return catchableOptions(itin, legIndex, now, hurry = true, liveOf = liveOf).filter { it.rideKey != leg.rideKey } + leg
+    }
+
+    /**
      * The catchable option of leg [legIndex] that gets you there first (ties: boards first),
      * or null when the current ride already is the best or nothing is catchable.
      */

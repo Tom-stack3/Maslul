@@ -122,6 +122,14 @@ abstract class Strings {
     abstract val findingRoutes: String
     abstract val noRoutes: String
     abstract val tryAgain: String
+    /** Where a past trip planning started, when it was from where the user was. */
+    abstract val whereYouWere: String
+    /** Over options kept from an earlier search: "Options shown at 14:05". */
+    abstract fun pastOptions(time: String): String
+    /** A recent's kept options, planned from where the user was: "Searched at 14:05". */
+    abstract fun searchedAt(time: String): String
+    abstract val searchNow: String
+    abstract val fromMyLocation: String
     abstract val earlier: String
     abstract val best: String
     abstract val fastest: String
@@ -285,6 +293,10 @@ abstract class Strings {
     abstract val noRidesAround: String
     abstract val noRidesAroundHint: String
     abstract val nothingMatchesRides: String
+    abstract fun lineAnywhere(line: String): String
+    abstract val lineAnywhereHint: String
+    abstract fun lookingForLine(line: String): String
+    abstract fun noLiveOfLine(line: String): String
     abstract val onBoardFooter: String
     abstract fun liveFromYou(distance: String): String
     abstract fun dueAt(stop: String): String

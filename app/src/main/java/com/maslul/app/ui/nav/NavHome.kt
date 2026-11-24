@@ -92,6 +92,7 @@ import com.maslul.app.data.PlaceKind
 import com.maslul.app.data.SavedTrip
 import com.maslul.app.ui.AppNav
 import com.maslul.app.ui.ScreenModel
+import com.maslul.app.ui.components.Fmt
 import com.maslul.app.ui.components.MapController
 import com.maslul.app.ui.components.MapMarker
 import com.maslul.app.ui.components.MarkerKind
@@ -130,6 +131,18 @@ class NavHomeModel(nav: AppNav) : ScreenModel(nav) {
     fun planTo(to: Place, from: Place = CurrentLocation) {
         store.addRecent(to)
         nav.push(RoutesModel(nav, from, to))
+    }
+
+    /** A recent destination: the options shown last time, as they were, if any were kept. */
+    fun openRecent(to: Place) {
+        val past = searches.forPlace(to) ?: return planTo(to)
+        store.addRecent(to)
+        nav.push(RoutesModel(nav, past.shownFrom, past.to, past))
+    }
+
+    fun removeRecent(p: Place) {
+        store.removeRecent(p)
+        searches.remove(p)
     }
 
     fun openSearch() {
@@ -373,18 +386,23 @@ private fun HomePlaces(model: NavHomeModel, data: UserData) {
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
         )
     }
+    val past by model.searches.searches.collectAsState()
     data.recents.take(6).forEach { p ->
+        val kept = past.firstOrNull { it.key == p.key }
         PlaceRow(
             title = p.name,
-            subtitle = p.subtitle,
+            // Kept options say where from and when, which is what tapping shows.
+            subtitle = kept?.let { k ->
+                if (k.fromHere) S.searchedAt(Fmt.dayTime(k.at)) else S.fromPlace(k.from.shownName) + " · " + Fmt.dayTime(k.at)
+            } ?: p.subtitle,
             icon = Icons.Rounded.History,
             trailing = {
-                IconButton(onClick = { model.store.removeRecent(p) }, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = { model.removeRecent(p) }, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Rounded.Close, S.remove, tint = LocalExtra.current.subtle, modifier = Modifier.size(18.dp))
                 }
             },
             onLongClick = { model.editFavorite(p) },
-            onClick = { model.planTo(p) },
+            onClick = { model.openRecent(p) },
         )
     }
     Spacer(Modifier.navigationBarsPadding().height(4.dp))

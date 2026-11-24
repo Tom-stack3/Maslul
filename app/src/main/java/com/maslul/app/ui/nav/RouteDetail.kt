@@ -428,9 +428,10 @@ private fun RouteMap(model: RouteDetailModel, modifier: Modifier, padding: Paddi
             }
         }
     }
-    val vehicles = itin.legs.flatMap { leg ->
-        // The chosen ride's bus last, so it's drawn on top.
-        (leg.alternatives + leg).mapNotNull { o ->
+    val vehicles = itin.legs.indices.flatMap { i ->
+        val leg = itin.legs[i]
+        // Only the rides still worth going for, as the list offers them: not ones already gone by.
+        Combine.shownOnMap(itin, i, now) { model.rideLive[it.rideKey] }.mapNotNull { o ->
             val v = model.rideLive[o.rideKey]?.vehicle ?: return@mapNotNull null
             val c = lineColor(o)
             MapVehicle("v${o.rideKey}", v.point, v.bearing, if (o === leg) c else lerp(c, bg, 0.4f), o.lineLabel,

@@ -131,6 +131,14 @@ class TrafficTest {
     }
 
     @Test
+    fun aLongDriveJamsOnlyNearTown() {
+        // Tel Aviv to Haifa at 08:00: typically 1.5–1.8× the night's, the open road between flowing.
+        val telAviv = GeoPoint(32.0853, 34.7818)
+        val haifa = GeoPoint(32.7940, 34.9896)
+        assertEquals(1.65, Traffic.factor(il("2026-10-27T08:00"), highway, telAviv, haifa), 0.15)
+    }
+
+    @Test
     fun aLiftOfferedInRushHourReachesLessFar() {
         assertTrue(Traffic.freeFlowMinutes(20, il("2026-10-27T08:00")) < 20)
         assertTrue(Traffic.freeFlowMinutes(20, il("2026-10-27T03:00")) in 18..21)

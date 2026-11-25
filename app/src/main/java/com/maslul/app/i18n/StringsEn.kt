@@ -1,5 +1,6 @@
 package com.maslul.app.i18n
 
+import com.maslul.app.data.GoogleRoutesApi
 import com.maslul.app.data.RailPreference
 import com.maslul.app.data.ThemeMode
 import com.maslul.app.data.TransitMode
@@ -336,6 +337,22 @@ internal object English : Strings() {
     override val onBoardSettingHint = "Plan the rest of the trip from the bus or train you're on"
     override val myShuttles = "My shuttles"
     override val myShuttlesHint = "Company or private shuttles with a fixed timetable"
+    override val liveTraffic = "Live traffic (Google Maps)"
+    override val liveTrafficOn = "On: driving times from Google Maps"
+    override val liveTrafficOff = "Off: driving times allow for the usual rush hours"
+    override val liveTrafficHint = "With your own Google Maps Platform key, rides use Google's live traffic, jams included. Google gives a free monthly allowance and charges your Google account beyond it. The key stays on this phone."
+    override val googleKey = "API key"
+    override val howToGetKey = "How to get a key"
+    override val liveTrafficChecking = "Checking the key with Google…"
+    override val liveTrafficRefused = "Not working: driving times allow for the usual rush hours"
+    override fun googleProblem(problem: GoogleRoutesApi.Problem) = when (problem) {
+        GoogleRoutesApi.Problem.BILLING -> "Google won't answer until billing is turned on for this key's Google Cloud project. The free monthly allowance still applies."
+        GoogleRoutesApi.Problem.API_DISABLED -> "The Routes API isn't turned on for this key's Google Cloud project."
+        GoogleRoutesApi.Problem.INVALID_KEY -> "Google doesn't recognise this key. Check it was copied whole."
+        GoogleRoutesApi.Problem.RESTRICTED -> "This key is restricted and doesn't allow Maslul or the Routes API. Allow both in the key's settings."
+        GoogleRoutesApi.Problem.QUOTA -> "This key has used up its limit for now."
+        GoogleRoutesApi.Problem.OTHER -> "Google refused the key."
+    }
     override fun nShuttles(n: Int) = "$n shuttles"
     override val about = "About"
     override val appName = "Maslul"

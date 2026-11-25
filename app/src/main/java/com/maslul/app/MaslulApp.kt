@@ -1,6 +1,9 @@
 package com.maslul.app
 
 import android.app.Application
+import android.content.pm.PackageManager
+import android.os.Build
+import com.maslul.app.data.GoogleRoutesApi
 import com.maslul.app.data.LocationRepo
 import com.maslul.app.data.SearchHistory
 import com.maslul.app.data.TransitRepository
@@ -9,10 +12,12 @@ import com.maslul.app.data.languageOrDefault
 import com.maslul.app.i18n.L10n
 import com.maslul.app.live.TripWatcher
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.maplibre.android.MapLibre
+import java.security.MessageDigest
 
 class MaslulApp : Application() {
     lateinit var repo: TransitRepository
@@ -37,10 +42,29 @@ class MaslulApp : Application() {
         MainScope().launch {
             store.data.map { it.settings.language to it.settings.simpleMode }.distinctUntilChanged().collect { applyLanguage() }
         }
+        MainScope().launch {
+            store.data.map { it.settings.googleMapsKey?.trim()?.takeIf(String::isNotEmpty) }.distinctUntilChanged().collectLatest { key ->
+                repo.google = key?.let { GoogleRoutesApi(it, packageName to signingCertSha1()) }
+                // Find out now whether Google takes it, rather than at the first ride.
+                repo.checkGoogle()
+            }
+        }
         // A trip's alert set, changed or removed: its next check moves with it.
         MainScope().launch {
             store.data.map { d -> d.savedTrips.map { it.key to it.alert } }.distinctUntilChanged().collect { TripWatcher.scheduleAll(this@MaslulApp) }
         }
+    }
+
+    /** SHA-1 of the app's signing certificate, as Google expects for a key restricted to this app. */
+    private fun signingCertSha1(): String {
+        val certs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES).signingInfo?.apkContentsSigners
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNATURES).signatures
+        }
+        val cert = certs?.firstOrNull()?.toByteArray() ?: return ""
+        return MessageDigest.getInstance("SHA-1").digest(cert).joinToString("") { "%02X".format(it) }
     }
 
     /** Speaks the language picked in Settings, else the phone's (which can change while the app runs). */

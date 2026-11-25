@@ -3,6 +3,9 @@ package com.maslul.app.data
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
@@ -38,6 +41,17 @@ data class StopArrival(
     val recordedAt: Instant? = null,
 )
 
+/** How the user's Google key is doing (see [TransitRepository.googleStatus]). */
+sealed interface GoogleStatus {
+    /** No key. */
+    data object Off : GoogleStatus
+    /** A key, not yet asked about (or the network was down when asked). */
+    data object Unknown : GoogleStatus
+    data object Checking : GoogleStatus
+    data object Working : GoogleStatus
+    data class Refused(val problem: GoogleRoutesApi.Problem) : GoogleStatus
+}
+
 data class BoardEntry(val departure: Departure, val live: LiveCall?)
 
 /** A line (one direction) serving a stop near the user, with its next departures there. */
@@ -65,6 +79,35 @@ class TransitRepository(
     }
 
     var language: String? = null
+
+    /** Live traffic for driving times, with the user's own Google key; else the usual rush hours ([Traffic]). */
+    @Volatile var google: GoogleRoutesApi? = null
+        set(value) {
+            field = value
+            googleState.value = if (value == null) GoogleStatus.Off else GoogleStatus.Unknown
+        }
+
+    private val googleState = MutableStateFlow<GoogleStatus>(GoogleStatus.Off)
+    /** Whether Google took the key, as of its last answer: Settings warns when it didn't. */
+    val googleStatus: StateFlow<GoogleStatus> = googleState.asStateFlow()
+
+    /** Asks Google whether the key works (see [googleStatus]). */
+    suspend fun checkGoogle() {
+        val g = google ?: return
+        googleState.value = GoogleStatus.Checking
+        runCatching { g.check() }.let { heard(g, it) }
+    }
+
+    /** Notes Google's answer to [g] (still the key in use): refused, or taken. A network hiccup says nothing about the key. */
+    private fun heard(g: GoogleRoutesApi, result: Result<*>) {
+        if (g !== google) return
+        val e = result.exceptionOrNull()
+        when {
+            e == null -> googleState.value = GoogleStatus.Working
+            e is GoogleKeyException -> googleState.value = GoogleStatus.Refused(e.problem)
+            googleState.value == GoogleStatus.Checking -> googleState.value = GoogleStatus.Unknown
+        }
+    }
 
     // ---- Places ---------------------------------------------------------------------
 
@@ -102,7 +145,22 @@ class TransitRepository(
             maxPreTransitMinutes = req.maxPreTransitMinutes?.let { Traffic.freeFlowMinutes(it, at, req.from) },
             maxDirectMinutes = req.maxDirectMinutes?.let { Traffic.freeFlowMinutes(it, at, req.from) },
         )
-        return Traffic.plan(transitous.plan(asked), req)
+        val result = transitous.plan(asked)
+        val cars = (result.itineraries + listOfNotNull(result.carOnly)).mapNotNull { itin -> itin.legs.firstOrNull { it.mode == TransitMode.CAR } }
+        val live = liveDriving(cars)
+        return Traffic.plan(result, req, known = { live[it] })
+    }
+
+    /** How long [drives] take in live traffic, by Google (one request for those starting at the same place); empty without a key. */
+    private suspend fun liveDriving(drives: List<Leg>): Map<Leg, Long> {
+        val g = google ?: return emptyMap()
+        if (drives.isEmpty()) return emptyMap()
+        return runCatching {
+            drives.groupBy { it.from.point }.flatMap { (from, legs) ->
+                legs.zip(g.drivingSec(from, legs.map { it.to.point }, legs.minOf { it.start }))
+                    .mapNotNull { (l, sec) -> sec?.let { l to it } }
+            }.toMap()
+        }.also { heard(g, it) }.getOrDefault(emptyMap())
     }
 
     /**
@@ -186,7 +244,7 @@ class TransitRepository(
             synchronized(carCache) { carCache[key] = car }
             car
         }
-        return Traffic.drive(free)
+        return Traffic.drive(free, known = liveDriving(listOf(free))[free])
     }
 
     /**

@@ -7,6 +7,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.foundation.Canvas
 import com.maslul.app.R
+import kotlinx.coroutines.launch
+import com.maslul.app.data.GoogleStatus
 import com.maslul.app.BuildConfig
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Color
@@ -82,8 +84,13 @@ import com.maslul.app.ui.components.SectionHeader
 import com.maslul.app.ui.theme.LocalExtra
 import com.maslul.app.i18n.S
 import com.maslul.app.data.AppLanguage
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 
 private const val SOURCE_URL = "https://github.com/Tom-stack3/Maslul"
+private const val GOOGLE_KEY_HELP_URL = "https://developers.google.com/maps/documentation/routes/get-api-key"
 
 class SettingsModel(nav: AppNav) : ScreenModel(nav) {
     var favoriteDraft by mutableStateOf<FavoriteDraft?>(null)
@@ -212,6 +219,10 @@ fun SettingsScreen(model: SettingsModel) {
                 iconTint = MaterialTheme.colorScheme.primary,
                 onClick = { model.nav.push(ShuttlesModel(model.nav)) },
             )
+            val google by model.repo.googleStatus.collectAsState()
+            GoogleTrafficSetting(s.googleMapsKey, google, onCheck = { model.scope.launch { model.repo.checkGoogle() } }) { key ->
+                model.store.updateSettings { it.copy(googleMapsKey = key) }
+            }
 
             SectionHeader(S.about)
             Row(
@@ -291,6 +302,60 @@ private fun SettingSwitch(title: String, subtitle: String, checked: Boolean, mod
         }
         Spacer(Modifier.width(12.dp))
         Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/**
+ * Live traffic with the user's own Google key: folded away until opened, since few will want it.
+ * Says when Google refuses the key ([status]), and why, since rides then quietly use the rush hours.
+ */
+@Composable
+private fun GoogleTrafficSetting(key: String?, status: GoogleStatus, onCheck: () -> Unit, onSave: (String?) -> Unit) {
+    var open by rememberSaveable { mutableStateOf(false) }
+    var draft by rememberSaveable(key) { mutableStateOf(key.orEmpty()) }
+    val uri = LocalUriHandler.current
+    Row(
+        Modifier.fillMaxWidth().clickable { open = !open }.padding(horizontal = 20.dp, vertical = 8.dp).testTag("live_traffic"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(S.liveTraffic, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                when {
+                    key.isNullOrBlank() -> S.liveTrafficOff
+                    status is GoogleStatus.Refused -> S.liveTrafficRefused
+                    status == GoogleStatus.Checking -> S.liveTrafficChecking
+                    else -> S.liveTrafficOn
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (status is GoogleStatus.Refused) MaterialTheme.colorScheme.error else LocalExtra.current.subtle,
+                modifier = Modifier.testTag("live_traffic_status"),
+            )
+        }
+        Icon(if (open) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown, null)
+    }
+    AnimatedVisibility(open) {
+        Column(Modifier.padding(horizontal = 20.dp)) {
+            Text(S.liveTrafficHint, style = MaterialTheme.typography.bodyMedium, color = LocalExtra.current.subtle)
+            OutlinedTextField(
+                draft, { draft = it },
+                label = { Text(S.googleKey) },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag("google_key"),
+            )
+            if (status is GoogleStatus.Refused) Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(S.googleProblem(status.problem), style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f).testTag("google_problem"))
+                TextButton(onClick = onCheck) { Text(S.tryAgain) }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { uri.openUri(GOOGLE_KEY_HELP_URL) }) { Text(S.howToGetKey) }
+                Spacer(Modifier.weight(1f))
+                if (key != null) TextButton(onClick = { draft = ""; onSave(null) }) { Text(S.remove) }
+                TextButton(onClick = { onSave(draft.trim().ifEmpty { null }) }, enabled = draft.trim() != key.orEmpty()) { Text(S.save) }
+            }
+        }
     }
 }
 

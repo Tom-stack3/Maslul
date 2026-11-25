@@ -1,5 +1,6 @@
 package com.maslul.app.i18n
 
+import com.maslul.app.data.GoogleRoutesApi
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -299,6 +300,15 @@ abstract class Strings {
     abstract val onBoardSettingHint: String
     abstract val myShuttles: String
     abstract val myShuttlesHint: String
+    abstract val liveTraffic: String
+    abstract val liveTrafficOn: String
+    abstract val liveTrafficOff: String
+    abstract val liveTrafficHint: String
+    abstract val googleKey: String
+    abstract val howToGetKey: String
+    abstract val liveTrafficChecking: String
+    abstract val liveTrafficRefused: String
+    abstract fun googleProblem(problem: GoogleRoutesApi.Problem): String
     abstract fun nShuttles(n: Int): String
     abstract val about: String
     abstract val appName: String

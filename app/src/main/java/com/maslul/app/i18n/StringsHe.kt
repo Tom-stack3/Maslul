@@ -1,5 +1,6 @@
 package com.maslul.app.i18n
 
+import com.maslul.app.data.GoogleRoutesApi
 import com.maslul.app.data.RailPreference
 import com.maslul.app.data.ThemeMode
 import com.maslul.app.data.TransitMode
@@ -358,6 +359,22 @@ internal object Hebrew : Strings() {
     override val onBoardSettingHint = "תכנון המשך הדרך מהאוטובוס או מהרכבת שאתם בהם"
     override val myShuttles = "ההסעות שלי"
     override val myShuttlesHint = "הסעות של העבודה או פרטיות עם לוח זמנים קבוע"
+    override val liveTraffic = "תנועה בזמן אמת (Google Maps)"
+    override val liveTrafficOn = "פועל: זמני נסיעה מ-Google Maps"
+    override val liveTrafficOff = "כבוי: זמני הנסיעה לוקחים בחשבון את שעות העומס הרגילות"
+    override val liveTrafficHint = "עם מפתח Google Maps Platform משלכם, הטרמפים מחושבים לפי התנועה של Google בזמן אמת, כולל פקקים. Google נותנת מכסה חודשית חינם ומחייבת את חשבון Google שלכם מעבר לה. המפתח נשמר רק בטלפון הזה."
+    override val googleKey = "מפתח API"
+    override val howToGetKey = "איך מקבלים מפתח"
+    override val liveTrafficChecking = "בודקים את המפתח מול Google…"
+    override val liveTrafficRefused = "לא עובד: זמני הנסיעה לוקחים בחשבון את שעות העומס הרגילות"
+    override fun googleProblem(problem: GoogleRoutesApi.Problem) = when (problem) {
+        GoogleRoutesApi.Problem.BILLING -> "Google לא תענה עד שיופעל חיוב (Billing) בפרויקט Google Cloud של המפתח. המכסה החודשית החינמית עדיין חלה."
+        GoogleRoutesApi.Problem.API_DISABLED -> "ה-Routes API לא מופעל בפרויקט Google Cloud של המפתח."
+        GoogleRoutesApi.Problem.INVALID_KEY -> "Google לא מכירה את המפתח. בדקו שהועתק במלואו."
+        GoogleRoutesApi.Problem.RESTRICTED -> "המפתח מוגבל ולא מאפשר את מסלול או את ה-Routes API. אפשרו את שניהם בהגדרות המפתח."
+        GoogleRoutesApi.Problem.QUOTA -> "המפתח ניצל את המכסה שלו לעת עתה."
+        GoogleRoutesApi.Problem.OTHER -> "Google דחתה את המפתח."
+    }
     override fun nShuttles(n: Int) = "$n הסעות"
     override val about = "אודות"
     override val appName = "מסלול"

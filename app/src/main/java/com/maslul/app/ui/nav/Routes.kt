@@ -42,6 +42,7 @@ import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.SwapCalls
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.WarningAmber
@@ -158,7 +159,8 @@ enum class TimeMode { NOW, DEPART, ARRIVE }
 /** Why a search came back empty, for screens that word [RoutesModel.error] their own way. */
 enum class RouteError { LOCATION, NO_ROUTES, NETWORK }
 
-class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null) : ScreenModel(nav) {
+/** With [nextRides], also looks up the rides after each option's first one: when the next bus comes (see [findNextRides]). */
+class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null, private val nextRides: Boolean = false) : ScreenModel(nav) {
     var from by mutableStateOf(from)
     var to by mutableStateOf(to)
     var timeMode by mutableStateOf(TimeMode.NOW)
@@ -294,6 +296,23 @@ class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null)
         }
     }
 
+    /**
+     * The next rides after each top option's first one, into [after]: what comes next if this bus is
+     * missed, which the other lines found for it don't tell when a line runs every half hour.
+     */
+    private suspend fun findNextRides() {
+        if (!nextRides) return
+        val modes = store.data.value.settings.modes
+        val legs = itineraries.take(6).mapNotNull { it.firstTransit }
+            .filter { it.shuttleId == null && (it.tripId == null || it.tripId != onBoardTripId) }
+            .distinctBy { it.rideKey }
+            .filter { it.rideKey !in after }
+        coroutineScope {
+            legs.map { l -> async { runCatching { l.rideKey to repo.ridesAfter(l, modes) }.getOrNull() } }
+                .awaitAll().filterNotNull().forEach { (k, v) -> after[k] = v }
+        }
+    }
+
     fun riskiest(itin: Itinerary) = Ranking.riskiest(itin, walkMps)
 
     /** The next ride if [t]'s connection is missed, if one is known. */
@@ -419,6 +438,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null)
             findAlternatives()
             refreshLive()
             findRidesAfter()
+            findNextRides()
             keep()
         }
     }
@@ -511,6 +531,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null)
             findAlternatives()
             refreshLive()
             findRidesAfter()
+            findNextRides()
             keep()
         }
     }
@@ -844,6 +865,7 @@ fun RoutesScreen(model: RoutesModel) {
 private fun SaveMenu(model: RoutesModel, data: UserData) {
     var open by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf<FavoriteDraft?>(null) }
+    var alerting by remember { mutableStateOf(false) }
     val tripSaved = data.savedTrips.any { it.from.key == model.from.key && it.to.key == model.to.key }
     // A trip from the bus you're on now isn't one to come back to.
     val canSaveTrip = model.from.kind != PlaceKind.ON_BOARD
@@ -864,6 +886,12 @@ private fun SaveMenu(model: RoutesModel, data: UserData) {
                     leadingIcon = { Icon(Icons.Rounded.SwapCalls, null) },
                     onClick = { open = false; model.toggleSaved() },
                 )
+                DropdownMenuItem(
+                    text = { Text(data.savedTrips.firstOrNull { it.from.key == model.from.key && it.to.key == model.to.key }?.alertLabel() ?: S.tripAlerts) },
+                    leadingIcon = { Icon(Icons.Rounded.NotificationsActive, null) },
+                    onClick = { open = false; alerting = true },
+                    modifier = Modifier.testTag("trip_alerts_item"),
+                )
             }
             if (canFavorite) {
                 DropdownMenuItem(
@@ -880,6 +908,12 @@ private fun SaveMenu(model: RoutesModel, data: UserData) {
         }
     }
     FavoriteDialogHost(model.store, draft) { draft = null }
+    if (alerting) {
+        // The time searched for, else the next five minutes from now: the likely usual departure.
+        val suggested = (model.time?.toLocalTime() ?: java.time.LocalTime.now(IsraelZone).plusMinutes(5))
+            .let { it.withMinute(it.minute / 5 * 5).withSecond(0).withNano(0) }
+        TripAlertDialog(model.store, SavedTrip(model.from, model.to), suggested) { alerting = false }
+    }
 }
 
 @Composable

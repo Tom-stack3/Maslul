@@ -11,6 +11,9 @@ import com.maslul.app.data.TransitMode
 import com.maslul.app.data.TransitRepository
 import com.maslul.app.data.TransitousApi
 import com.maslul.app.data.TripIds
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertFalse
 import org.junit.Assume
@@ -70,6 +73,40 @@ class LiveApiSmokeTest {
             val lines = i.transitLegs.joinToString(">") { it.lineLabel }
             println("${i.start}–${i.end} t${i.transfers} $lines risk=${Ranking.riskiest(i)?.slackSec}")
         }
+    }
+
+    /** 08:00 on the next weekday, when buses run everywhere. */
+    private fun weekdayMorning(): Instant {
+        var day = LocalDate.now(IsraelZone).plusDays(1)
+        while (day.dayOfWeek == java.time.DayOfWeek.FRIDAY || day.dayOfWeek == java.time.DayOfWeek.SATURDAY) day = day.plusDays(1)
+        return day.atTime(8, 0).atZone(IsraelZone).toInstant()
+    }
+
+    @Test
+    fun shortTripOffersRidesBesideTheWalk() = runBlocking {
+        // Tel Aviv central station to a street 500 m north: a 14-minute walk, and a bus that's hardly faster.
+        val r = repo.plan(TransitousApi.PlanRequest(GeoPoint(32.0560, 34.7795), GeoPoint(32.0605, 34.7795), time = weekdayMorning()))
+        println("short: walk ${r.walkOnly?.durationSec?.div(60)} min, rides ${r.itineraries.map { it.transitLegs.joinToString(">") { l -> l.lineLabel } }}")
+        assertTrue(r.walkOnly != null)
+        assertTrue("expected rides too", r.itineraries.isNotEmpty())
+    }
+
+    @Test
+    fun plansFromInsideAClosedArea() = runBlocking {
+        // The middle of the Kirya, more than 250 m from a street open to the public.
+        val r = repo.plan(TransitousApi.PlanRequest(GeoPoint(32.0753, 34.7897), GeoPoint(32.0809, 34.7806), time = weekdayMorning()))
+        assertTrue("expected a way out", r.itineraries.isNotEmpty() || r.walkOnly != null)
+    }
+
+    @Test
+    fun manyPlansAtOnceAllGetAnswers() = runBlocking {
+        // More than Transitous takes from one address at a time, as a search's lookups of other lines are.
+        val to = GeoPoint(32.0745, 34.7920)
+        val results = coroutineScope {
+            (0 until 7).map { i -> async { runCatching { repo.plan(TransitousApi.PlanRequest(GeoPoint(32.08 + i * 0.003, 34.775), to)) } } }.awaitAll()
+        }
+        results.forEach { r -> r.exceptionOrNull()?.let { throw it } }
+        assertTrue(results.all { it.getOrThrow().itineraries.isNotEmpty() })
     }
 
     @Test

@@ -63,6 +63,8 @@ class TransitRepository(
     private val stride: StrideApi = StrideApi(),
     private val nominatim: NominatimApi = NominatimApi(),
     val live: LiveRepository = LiveRepository(),
+    /** The Ministry's predicted arrivals; null leaves the estimates from vehicle positions alone. */
+    private val predictions: StopPredictions? = StopPredictions(),
 ) {
     private val tripCache = object : LinkedHashMap<String, Leg>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Leg>?) = size > 80
@@ -540,6 +542,35 @@ class TransitRepository(
             ?.also { synchronized(tripCache) { tripCache[tripId] = it } }
     }
 
+    /**
+     * The best ways for [req] as a saved trip's alerts weigh them: when to leave to catch each one's first
+     * ride as it's expected (live where it's tracked) and when you'd get there.
+     */
+    suspend fun tripOptions(req: TransitousApi.PlanRequest, rail: RailPreference, now: Instant = Instant.now()): List<TripAlerts.Option> =
+        coroutineScope {
+            val found = plan(req).itineraries.sortedBy { Ranking.score(it, false, req.walkSpeedMps, rail) }
+            Ranking.rank(Combine.merge(found), false, req.walkSpeedMps, rail)
+                .filter { it.firstTransit != null }
+                .take(TRIP_OPTIONS)
+                .map { itin -> async { runCatching { tripOption(itin, now) }.getOrNull() } }
+                .awaitAll().filterNotNull()
+        }
+
+    private suspend fun tripOption(itin: Itinerary, now: Instant): TripAlerts.Option? {
+        val i = itin.legs.indexOfFirst { it.mode.isTransit }.takeIf { it >= 0 } ?: return null
+        val first = itin.legs[i]
+        val call = if (first.start.isBefore(now.plusSeconds(PREDICTION_AHEAD_SEC))) legLive(first, now) else null
+        val live = call?.status == LiveStatus.LIVE
+        val board = Combine.boards(first, call)
+        val walk = itin.legs.subList(0, i).sumOf { it.durationSec }
+        val arrive = Combine.expected(itin) { l -> if (l.rideKey == first.rideKey) call else null }.end
+        return TripAlerts.Option(
+            leaveAt = board.minusSeconds(walk), arriveAt = arrive, line = first.lineLabel, mode = first.mode,
+            boardAt = board, stop = first.from.name, live = live,
+            lateMinutes = if (live) (call!!.delaySec / 60).coerceAtLeast(0) else 0,
+        )
+    }
+
     /** Live state of a transit leg: where its vehicle is and when it reaches the boarding stop. */
     suspend fun legLive(leg: Leg, now: Instant = Instant.now()): LiveCall? {
         val tripId = leg.tripId ?: return null
@@ -552,7 +583,17 @@ class TransitRepository(
         val vehicles = leg.lineRef?.let { live.vehiclesForLine(it) }.orEmpty()
         val v = vehicles.forTrip(parsed.tripNumber, parsed.originDeparture)
         val origin = calls.first().scheduledTime ?: parsed.originDeparture
-        return LiveCalls.compute(timeline, origin, board, alight, v, now)
+        val call = LiveCalls.compute(timeline, origin, board, alight, v, now)
+        // The Ministry predicts buses on their way; a ride later than that has no prediction to look up.
+        return if (call.best.isAfter(now.plusSeconds(PREDICTION_AHEAD_SEC))) call else withPrediction(call, leg.from, tripId, leg.lineRef, now)
+    }
+
+    /** [call] (trip [tripId] of line [lineRef] at [stop]) with the Ministry's predicted arrival there, when it has one. */
+    private suspend fun withPrediction(call: LiveCall, stop: StopCall, tripId: String, lineRef: String?, now: Instant): LiveCall {
+        val code = stop.code ?: return call
+        val parsed = TripIds.parse(tripId) ?: return call
+        val p = predictions?.at(code)?.let { StopPredictions.find(it, parsed.gtfsTripId, lineRef, parsed.originDeparture) }
+        return LiveCalls.withPrediction(call, p, now)
     }
 
     /**
@@ -603,7 +644,7 @@ class TransitRepository(
             runCatching { transitous.stopTimes(stopId, now.minusSeconds(LATE_WINDOW_SEC), count = 10, language = language, windowSec = LATE_WINDOW_SEC) }
                 .getOrDefault(emptyList())
         }
-        val deps = perLine(mergeDepartures(upcoming.await(), recent.await(), now), now)
+        val deps = perLine(atStop(mergeDepartures(upcoming.await(), recent.await(), now), stopId), now)
         val snapshot = live.snapshot()
         boardEntries(deps, snapshot, now)
     }
@@ -631,7 +672,9 @@ class TransitRepository(
                     } else {
                         null
                     }
-                    BoardEntry(d, liveCall)
+                    val predicted = liveCall?.takeIf { d.scheduled.isBefore(now.plusSeconds(PREDICTION_AHEAD_SEC)) || it.status == LiveStatus.LIVE }
+                        ?.let { runCatching { withPrediction(it, d.stop, d.tripId, TripIds.lineRef(d.routeId), now) }.getOrNull() }
+                    BoardEntry(d, predicted ?: liveCall)
                 }
             }.awaitAll().let { arrangeBoard(it, now) }
         }
@@ -642,11 +685,16 @@ class TransitRepository(
     /** Lines leaving from the stops nearest to [here], each at its closest stop. */
     suspend fun nearbyLines(here: GeoPoint, stops: List<Place>, now: Instant = Instant.now()): List<NearbyLine> = coroutineScope {
         stops.filter { it.stopId != null }.take(8)
-            .map { st -> async { runCatching { st to transitous.stopTimes(st.stopId!!, count = 25, language = language) }.getOrNull() } }
+            .map { st ->
+                async {
+                    // The next hour: a count alone gives a busy stop's frequent lines and leaves the rest out.
+                    runCatching { st to transitous.stopTimes(st.stopId!!, count = 25, language = language, windowSec = 3600) }.getOrNull()
+                }
+            }
             .awaitAll().filterNotNull()
             .flatMap { (st, deps) ->
                 val d = GeoMath.distance(here, st.point)
-                deps.filter { it.scheduled.isAfter(now.minusSeconds(60)) }.map { Triple(st, d, it) }
+                atStop(deps, st.stopId!!).filter { it.scheduled.isAfter(now.minusSeconds(60)) }.map { Triple(st, d, it) }
             }
             .groupBy { (_, _, dep) -> "${dep.routeId ?: dep.lineLabel}|${dep.headsign}" }
             .values.map { g ->
@@ -818,6 +866,12 @@ class TransitRepository(
         private const val FAN_OUT = 2
         private const val ONWARD_TIMEOUT_MS = 15_000L
 
+        /** Ways weighed for a saved trip's alerts. */
+        private const val TRIP_OPTIONS = 6
+
+        /** Rides due within this long are looked up in the Ministry's predictions (see [StopPredictions]). */
+        const val PREDICTION_AHEAD_SEC = 45 * 60L
+
         /** How far back to look for late trips whose scheduled time at a stop already passed. */
         const val LATE_WINDOW_SEC = 90 * 60L
 
@@ -828,6 +882,19 @@ class TransitRepository(
                 .filter { it.scheduled.isAfter(now.minusSeconds(LATE_WINDOW_SEC)) }
                 .filter { seen.add(it.tripId + "|" + it.scheduled.epochSecond) }
                 .sortedBy { it.scheduled }
+        }
+
+        /**
+         * The departures that leave from [stopId] itself. Transitous adds those of same-named stops
+         * nearby, such as the one across the street, whose buses go the other way; bays of one
+         * station share its stop code and stay. Unchanged when none leave from the stop (a station's
+         * own id, whose bays have ids of their own).
+         */
+        fun atStop(deps: List<Departure>, stopId: String): List<Departure> {
+            val own = deps.filter { it.stop.stopId == stopId }
+            if (own.isEmpty()) return deps
+            val code = own.firstNotNullOfOrNull { it.stop.code }
+            return deps.filter { it.stop.stopId == stopId || (code != null && it.stop.code == code) }
         }
 
         /** Rides of each line and direction a board shows: any whose time here has passed (maybe late), and the next [next]. */

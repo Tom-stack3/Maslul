@@ -54,8 +54,8 @@ object Http {
     }
 
     /** Reads the body off the main thread: callers run there, and several requests at once would queue on it. */
-    suspend fun getString(url: HttpUrl): String {
-        val response = execute(Request.Builder().url(url).build())
+    suspend fun getString(url: HttpUrl, headers: Map<String, String> = emptyMap()): String {
+        val response = execute(Request.Builder().url(url).apply { headers.forEach { (k, v) -> header(k, v) } }.build())
         return withContext(Dispatchers.IO) {
             response.use {
                 if (!it.isSuccessful) throw HttpException(it.code, "HTTP ${it.code} for ${url.encodedPath}")

@@ -89,7 +89,15 @@ val DefaultSimpleButtons = listOf(
 )
 
 @Serializable
-data class SavedTrip(val from: Place, val to: Place, val label: String? = null)
+data class SavedTrip(
+    val from: Place,
+    val to: Place,
+    val label: String? = null,
+    /** When it's usually taken, to be told in time (see [TripAlerts]); null when it isn't watched. */
+    val alert: TripAlert? = null,
+) {
+    val key get() = "${from.key}>${to.key}"
+}
 
 /** Icon a user can pick for a favourite place. */
 @Serializable
@@ -220,6 +228,13 @@ class UserStore(context: Context) {
             savedTrips = if (exists) d.savedTrips.filterNot { it.from.key == t.from.key && it.to.key == t.to.key }
             else d.savedTrips + t,
         )
+    }
+
+    /** Watches saved trip [trip] at [alert]'s times (null stops watching), saving the trip first if needed. */
+    fun setTripAlert(trip: SavedTrip, alert: TripAlert?) = edit { d ->
+        val i = d.savedTrips.indexOfFirst { it.key == trip.key }
+        val updated = (if (i >= 0) d.savedTrips[i] else trip).copy(alert = alert)
+        d.copy(savedTrips = if (i >= 0) d.savedTrips.toMutableList().also { it[i] = updated } else d.savedTrips + updated)
     }
 
     fun updateSettings(f: (Settings) -> Settings) = edit { it.copy(settings = f(it.settings)) }

@@ -39,6 +39,12 @@ abstract class SimpleStrings {
     abstract val best: String
     abstract val moreOptions: String
     abstract val live: String
+    /** Over the buses an option could take: "Next at Dizengoff Center". */
+    abstract fun nextAt(stop: String): String
+    abstract val comesNow: String
+    abstract fun comesIn(min: Long): String
+    abstract fun comesAt(time: String): String
+    abstract val hurry: String
     abstract val errLocation: String
     abstract val errNoRoutes: String
     abstract val errNetwork: String
@@ -130,6 +136,11 @@ private object English : SimpleStrings() {
     override val best = "Best"
     override val moreOptions = "More options"
     override val live = "Live"
+    override fun nextAt(stop: String) = "Next at $stop"
+    override val comesNow = "now"
+    override fun comesIn(min: Long) = "in $min min"
+    override fun comesAt(time: String) = "at $time"
+    override val hurry = "Hurry!"
     override val errLocation = "Can't tell where you are. Turn on location and try again."
     override val errNoRoutes = "No way to get there right now."
     override val errNetwork = "No internet connection. Try again."
@@ -235,6 +246,11 @@ private object Hebrew : SimpleStrings() {
     override val best = "הכי טוב"
     override val moreOptions = "עוד אפשרויות"
     override val live = "בזמן אמת"
+    override fun nextAt(stop: String) = "הבאים בתחנה $stop"
+    override val comesNow = "עכשיו"
+    override fun comesIn(min: Long) = "בעוד $min דק׳"
+    override fun comesAt(time: String) = "ב־$time"
+    override val hurry = "מהרו!"
     override val errLocation = "לא מצליחים לדעת איפה אתם. הפעילו מיקום ונסו שוב."
     override val errNoRoutes = "אין דרך להגיע לשם כרגע."
     override val errNetwork = "אין חיבור לאינטרנט. נסו שוב."
@@ -337,6 +353,11 @@ private object Russian : SimpleStrings() {
     override val best = "Лучший"
     override val moreOptions = "Другие варианты"
     override val live = "Онлайн"
+    override fun nextAt(stop: String) = "Ближайшие на остановке $stop"
+    override val comesNow = "сейчас"
+    override fun comesIn(min: Long) = "через $min мин"
+    override fun comesAt(time: String) = "в $time"
+    override val hurry = "Спешите!"
     override val errLocation = "Не удаётся определить, где вы. Включите геолокацию и попробуйте снова."
     override val errNoRoutes = "Сейчас туда не добраться."
     override val errNetwork = "Нет подключения к интернету. Попробуйте снова."

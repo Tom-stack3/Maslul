@@ -158,7 +158,8 @@ enum class TimeMode { NOW, DEPART, ARRIVE }
 /** Why a search came back empty, for screens that word [RoutesModel.error] their own way. */
 enum class RouteError { LOCATION, NO_ROUTES, NETWORK }
 
-class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null) : ScreenModel(nav) {
+/** With [nextRides], also looks up the rides after each option's first one: when the next bus comes (see [findNextRides]). */
+class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null, private val nextRides: Boolean = false) : ScreenModel(nav) {
     var from by mutableStateOf(from)
     var to by mutableStateOf(to)
     var timeMode by mutableStateOf(TimeMode.NOW)
@@ -294,6 +295,23 @@ class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null)
         }
     }
 
+    /**
+     * The next rides after each top option's first one, into [after]: what comes next if this bus is
+     * missed, which the other lines found for it don't tell when a line runs every half hour.
+     */
+    private suspend fun findNextRides() {
+        if (!nextRides) return
+        val modes = store.data.value.settings.modes
+        val legs = itineraries.take(6).mapNotNull { it.firstTransit }
+            .filter { it.shuttleId == null && (it.tripId == null || it.tripId != onBoardTripId) }
+            .distinctBy { it.rideKey }
+            .filter { it.rideKey !in after }
+        coroutineScope {
+            legs.map { l -> async { runCatching { l.rideKey to repo.ridesAfter(l, modes) }.getOrNull() } }
+                .awaitAll().filterNotNull().forEach { (k, v) -> after[k] = v }
+        }
+    }
+
     fun riskiest(itin: Itinerary) = Ranking.riskiest(itin, walkMps)
 
     /** The next ride if [t]'s connection is missed, if one is known. */
@@ -419,6 +437,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null)
             findAlternatives()
             refreshLive()
             findRidesAfter()
+            findNextRides()
             keep()
         }
     }
@@ -511,6 +530,7 @@ class RoutesModel(nav: AppNav, from: Place, to: Place, past: PastSearch? = null)
             findAlternatives()
             refreshLive()
             findRidesAfter()
+            findNextRides()
             keep()
         }
     }

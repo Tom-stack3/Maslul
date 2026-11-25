@@ -89,10 +89,12 @@ object Traffic {
             else -> COUNTRY_STRETCH
         }
         val weekday = if (area == COUNTRY_STRETCH) 1.0 else WEEKDAY_STRETCH
+        // A long drive is in town only near its ends: the rest is open road, timed as in the country.
+        val inTown = if (from == null || to == null) 1.0 else (CITY_REACH_M / distanceM(from, to)).coerceAtMost(1.0)
         // The traffic part, stretched for cars; per hour, so it blends smoothly into the weekend too.
         fun at(table: Array<DoubleArray>, k: Int): Double {
             val day = k / 24
-            val stretch = (if (day <= 4) weekday else 1.0) * area
+            val stretch = (if (day <= 4) weekday else 1.0) * area * inTown + COUNTRY_STRETCH * (1 - inTown)
             return 1 + (table[day][k % 24] - 1) * stretch
         }
         fun blend(table: Array<DoubleArray>) = at(table, i) * (1 - f) + at(table, (i + 1) % WEEK) * f
@@ -126,9 +128,14 @@ object Traffic {
         return Math.hypot(ax + t * dx, ay + t * dy) <= radiusM
     }
 
+    private fun distanceM(a: GeoPoint, b: GeoPoint) =
+        Math.hypot((b.lon - a.lon) * 111_320 * Math.cos(Math.toRadians(a.lat)), (b.lat - a.lat) * 110_570.0)
+
     private fun Leg.shifted(sec: Long) = copy(start = start.plusSeconds(sec), end = end.plusSeconds(sec))
 
     private const val WEEK = 7 * 24
+    /** How far, as the crow flies, a drive's town traffic reaches; beyond it, open road. */
+    private const val CITY_REACH_M = 30_000.0
     private const val CITY_KMH = 35.0
     private const val HIGHWAY_KMH = 70.0
     /** A lift is a bit of both; for sizing how far it reaches before its route is known. */
